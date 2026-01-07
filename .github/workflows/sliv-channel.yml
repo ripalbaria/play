@@ -15,42 +15,41 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea using curl (Browser Simulation with Proxy)
+      - name: Fetch hdnea using ScraperAPI
         id: fetch_hdnea
         run: |
-          API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          PROXY_ADDR="202.83.30.96:80"
-
-          echo "Fetching API via Proxy..."
-          RESPONSE=$(curl -s -L \
-            --proxy "$PROXY_ADDR" \
-            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
-            -H 'Accept: application/json, text/plain, */*' \
-            -H 'Referer: https://www.sonyliv.com/' \
-            -H 'Origin: https://www.sonyliv.com' \
-            "$API_URL")
-
-          # Extract videoURL
-          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+          # Your ScraperAPI Key from the screenshot
+          API_KEY="e26053076e5a9c2f408e2567e957800"
           
-          if [ -z "$VIDEO_URL" ]; then
-            echo "Error: Could not get videoURL. Proxy might be down."
+          # Target SonyLIV URL
+          TARGET_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
+          
+          # Construct ScraperAPI URL with Indian Geotargeting
+          # country_code=in ensures the request comes from India
+          # render=true is optional but helps if SonyLIV uses heavy JS
+          SCRAPER_URL="http://api.scraperapi.com?api_key=${API_KEY}&url=${TARGET_URL}&country_code=in"
+
+          echo "Fetching SonyLIV API via ScraperAPI (India)..."
+
+          # Increase timeout to 70s as recommended by ScraperAPI
+          RESPONSE=$(curl -s -L --connect-timeout 30 --max-time 75 "$SCRAPER_URL")
+
+          if [[ "$RESPONSE" == *"EPDblocked"* ]]; then
+            echo "Error: Still blocked. Try adding '&premium=true' to the URL."
             exit 1
           fi
 
-          # Download .mpd via Proxy to get hdnea
-          MPD_CONTENT=$(curl -s -L \
-            --proxy "$PROXY_ADDR" \
-            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
-            "$VIDEO_URL")
+          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
 
-          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
-          
-          if [ -z "$HDNEA" ]; then
+          if [[ "$VIDEO_URL" == *"http"* ]]; then
             HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+            echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
+            echo "Success! Found HDNEA token."
+          else
+            echo "Error: Could not find videoURL in response."
+            echo "Full Response: $RESPONSE"
+            exit 1
           fi
-
-          echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update Slivtv.json
         run: |
@@ -62,4 +61,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update via ScraperAPI" && git push)
