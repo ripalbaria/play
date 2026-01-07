@@ -21,7 +21,7 @@ jobs:
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
           # Note: Public proxies like this one often expire. 
           # If it fails again, try a new IP.
-          PROXY_ADDR="163.227.186.101:3128"
+          PROXY_ADDR="14.195.222.149:80"
 
           echo "Fetching API via Proxy..."
           # Added -k to bypass SSL verification (Fixes Error 60)
