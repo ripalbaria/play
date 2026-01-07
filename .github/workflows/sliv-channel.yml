@@ -19,7 +19,7 @@ jobs:
         id: fetch_hdnea
         run: |
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          PROXY_ADDR="103.169.154.4:83"
+          PROXY_ADDR="202.83.30.96:80"
 
           echo "Fetching API via Proxy..."
           RESPONSE=$(curl -s -L \
