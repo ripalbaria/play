@@ -2,7 +2,7 @@ name: Update SonyLIV Channels
 
 on:
   schedule:
-    - cron: '0 */1 * * *'   # Runs every hour
+    - cron: '0 */1 * * *'
   workflow_dispatch:
 
 jobs:
@@ -15,17 +15,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea with Proxy Rotation
+      - name: Fetch hdnea with Fast Proxy Rotation
         id: fetch_hdnea
         run: |
-          # List of Indian Proxies (Public/Enterprise mix)
+          # Fresh 2026 Indian Proxy List
           PROXIES=(
             "103.170.46.245:8080"
             "108.165.152.59:80"
-            "14.195.222.145:80"
+            "43.249.225.174:80"
             "139.59.1.14:3128"
             "64.227.131.240:1080"
-            "43.249.225.174:80"
+            "14.195.222.145:80"
           )
 
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
@@ -35,31 +35,26 @@ jobs:
             echo "---------------------------------------"
             echo "Testing Proxy: $PROXY"
             
-            # Using --max-time 15 to skip dead proxies quickly
-            RESPONSE=$(curl -s -L --max-time 15 \
+            # Using --connect-timeout 5 to skip dead proxies instantly
+            RESPONSE=$(curl -s -L --connect-timeout 5 --max-time 10 \
               --proxy "$PROXY" \
               -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
               -H 'Referer: https://www.sonyliv.com/' \
-              -H 'Origin: https://www.sonyliv.com' \
               "$API_URL")
 
-            # Try to extract videoURL
+            # Validate if we got a real JSON response with a videoURL
             VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
 
-            if [ ! -z "$VIDEO_URL" ] && [[ "$VIDEO_URL" == *"http"* ]]; then
+            if [[ "$VIDEO_URL" == *"http"* ]]; then
               echo "Success! Found videoURL using $PROXY"
               
-              # Download MPD to get hdnea
-              MPD_CONTENT=$(curl -s -L --max-time 15 \
-                --proxy "$PROXY" \
-                -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
-                "$VIDEO_URL")
-
-              HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+              # Extract hdnea directly from the URL or the MPD
+              HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
               
-              # Fallback if hdnea is only in the URL
               if [ -z "$HDNEA" ]; then
-                HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+                # Fallback: Check MPD content if not in URL
+                MPD_CONTENT=$(curl -s -L --connect-timeout 5 --proxy "$PROXY" "$VIDEO_URL")
+                HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
               fi
 
               if [ ! -z "$HDNEA" ]; then
@@ -69,34 +64,25 @@ jobs:
                 break
               fi
             fi
-            echo "Proxy $PROXY failed or timed out. Trying next..."
+            echo "Proxy $PROXY timed out (Error 28) or returned invalid data. Trying next..."
           done
 
           if [ "$SUCCESS" = false ]; then
-            echo "All proxies failed. Please update the proxy list."
+            echo "Error: All proxies failed. No Indian connection established."
             exit 1
           fi
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          if [ -f "Slivtv.json" ]; then
-            # Replace old hdnea with new one globally
-            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
-            echo "Slivtv.json updated successfully."
-          else
-            echo "Slivtv.json not found!"
-            exit 1
-          fi
+          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          if git diff --staged --quiet; then
-            echo "No changes to commit."
-          else
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV hdnea" && git push)
             git commit -m "Auto-update SonyLIV hdnea (Proxy Rotation)"
             git push
           fi
