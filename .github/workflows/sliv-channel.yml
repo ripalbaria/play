@@ -18,35 +18,43 @@ jobs:
       - name: Fetch hdnea using ScraperAPI
         id: fetch_hdnea
         run: |
-          # Your ScraperAPI Key from the screenshot
+          # Your ScraperAPI Key
           API_KEY="e26053076e5a9c2f408e2567e957800"
           
-          # Target SonyLIV URL
+          # SonyLIV API Target
           TARGET_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
           
-          # Construct ScraperAPI URL with Indian Geotargeting
-          # country_code=in ensures the request comes from India
-          # render=true is optional but helps if SonyLIV uses heavy JS
-          SCRAPER_URL="http://api.scraperapi.com?api_key=${API_KEY}&url=${TARGET_URL}&country_code=in"
+          # Removed country_code=in to avoid "Unauthorized" plan error
+          # Using premium=true for residential IP rotation
+          SCRAPER_URL="http://api.scraperapi.com?api_key=${API_KEY}&url=${TARGET_URL}&premium=true"
 
-          echo "Fetching SonyLIV API via ScraperAPI (India)..."
+          echo "Fetching SonyLIV via ScraperAPI Premium Residential..."
 
-          # Increase timeout to 70s as recommended by ScraperAPI
-          RESPONSE=$(curl -s -L --connect-timeout 30 --max-time 75 "$SCRAPER_URL")
+          # High timeout (90s) is required for ScraperAPI internal retries
+          RESPONSE=$(curl -s -L --connect-timeout 30 --max-time 90 "$SCRAPER_URL")
 
-          if [[ "$RESPONSE" == *"EPDblocked"* ]]; then
-            echo "Error: Still blocked. Try adding '&premium=true' to the URL."
+          # Check for Plan/Auth errors
+          if [[ "$RESPONSE" == *"Unauthorized"* ]]; then
+            echo "Error: API Key invalid or Plan restricted. Check ScraperAPI Dashboard."
             exit 1
           fi
 
+          # Extract videoURL
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
 
           if [[ "$VIDEO_URL" == *"http"* ]]; then
+            # Extract the token
             HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
-            echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
-            echo "Success! Found HDNEA token."
+            
+            if [ ! -z "$HDNEA" ]; then
+              echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
+              echo "Success: Token extracted."
+            else
+              echo "Error: videoURL found but hdnea token missing."
+              exit 1
+            fi
           else
-            echo "Error: Could not find videoURL in response."
+            echo "Error: Could not find valid videoURL in response."
             echo "Full Response: $RESPONSE"
             exit 1
           fi
@@ -54,11 +62,17 @@ jobs:
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
+          if [ -f "Slivtv.json" ]; then
+            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
+            echo "Slivtv.json updated."
+          else
+            echo "Slivtv.json not found!"
+            exit 1
+          fi
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update via ScraperAPI" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV (ScraperAPI)" && git push)
