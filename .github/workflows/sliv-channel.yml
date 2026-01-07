@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea with Fast Proxy Rotation
+      - name: Fetch hdnea with Proxy Rotation (Fixed Loop)
         id: fetch_hdnea
         run: |
           # Fresh 2026 Indian Proxy List
@@ -35,47 +35,57 @@ jobs:
             echo "---------------------------------------"
             echo "Testing Proxy: $PROXY"
             
-            # Using --connect-timeout 5 to skip dead proxies instantly
-            RESPONSE=$(curl -s -L --connect-timeout 5 --max-time 10 \
+            # The 'if' block prevents Exit Code 28 from crashing the script
+            if RESPONSE=$(curl -s -L --connect-timeout 5 --max-time 12 \
               --proxy "$PROXY" \
               -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
               -H 'Referer: https://www.sonyliv.com/' \
-              "$API_URL")
+              "$API_URL"); then
 
-            # Validate if we got a real JSON response with a videoURL
-            VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+              # Check if the response contains the videoURL
+              VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
 
-            if [[ "$VIDEO_URL" == *"http"* ]]; then
-              echo "Success! Found videoURL using $PROXY"
-              
-              # Extract hdnea directly from the URL or the MPD
-              HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
-              
-              if [ -z "$HDNEA" ]; then
-                # Fallback: Check MPD content if not in URL
-                MPD_CONTENT=$(curl -s -L --connect-timeout 5 --proxy "$PROXY" "$VIDEO_URL")
-                HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+              if [[ "$VIDEO_URL" == *"http"* ]]; then
+                echo "Success! Found videoURL using $PROXY"
+                
+                # Extract hdnea from URL or MPD
+                HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+                
+                if [ -z "$HDNEA" ]; then
+                  # Optional: fetch MPD if hdnea not in URL
+                  MPD_CONTENT=$(curl -s -L --connect-timeout 5 --proxy "$PROXY" "$VIDEO_URL") || true
+                  HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+                fi
+
+                if [ ! -z "$HDNEA" ]; then
+                  echo "Extracted HDNEA: $HDNEA"
+                  echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
+                  SUCCESS=true
+                  break
+                fi
               fi
-
-              if [ ! -z "$HDNEA" ]; then
-                echo "Extracted: $HDNEA"
-                echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
-                SUCCESS=true
-                break
-              fi
+            else
+              echo "Proxy $PROXY timed out or failed (Exit Code 28)."
             fi
-            echo "Proxy $PROXY timed out (Error 28) or returned invalid data. Trying next..."
+            
+            echo "Moving to next proxy..."
           done
 
           if [ "$SUCCESS" = false ]; then
-            echo "Error: All proxies failed. No Indian connection established."
+            echo "Error: All proxies in the list failed."
             exit 1
           fi
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
+          if [ -f "Slivtv.json" ]; then
+            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
+            echo "Slivtv.json updated."
+          else
+            echo "File Slivtv.json not found!"
+            exit 1
+          fi
 
       - name: Commit & Push
         run: |
@@ -83,6 +93,3 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV hdnea" && git push)
-            git commit -m "Auto-update SonyLIV hdnea (Proxy Rotation)"
-            git push
-          fi
