@@ -18,8 +18,8 @@ jobs:
       - name: Fetch with Proxy
         run: |
           # 1. Fetch data using the Indian Proxy
-          # Using proxy: 108.165.152.59:80
-          RESPONSE=$(curl -x "http://108.165.152.59:80" -L --compressed \
+          # Using proxy: 108.165.152.222:80
+          RESPONSE=$(curl -x "http://108.165.152.222:80" -L --compressed \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0" \
             -H "Accept: */*" \
             -H "Accept-Encoding: gzip" \
