@@ -1,4 +1,4 @@
-name: Update SonyLIV Channels (HTTP Proxy :80)
+name: Update SonyLIV Channels (HTTP :80 + India Check)
 
 on:
   schedule:
@@ -11,23 +11,36 @@ jobs:
     permissions:
       contents: write
 
-    env:
-      http_proxy: http://14.195.222.149:80
-      https_proxy: http://14.195.222.149:80
-      CURL_HTTP_VERSION: 1.1
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 🔍 STEP 1 — Verify proxy exit country (ONLY curl uses proxy)
+      - name: Verify proxy is India
+        run: |
+          set -e
+          GEO=$(curl -s \
+            --http1.1 \
+            --proxy http://14.195.222.149:80 \
+            --proxy-insecure \
+            https://ipinfo.io/country || true)
+
+          echo "Proxy country: $GEO"
+
+          if [ "$GEO" != "IN" ]; then
+            echo "❌ Proxy not India / leaking"
+            exit 1
+          fi
+
+          echo "✅ Proxy confirmed India"
+
+      # 🎯 STEP 2 — Fetch SonyLIV hdnea
       - name: Fetch hdnea via HTTP proxy :80
         id: fetch_hdnea
         run: |
           set -e
 
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-
-          echo "Fetching SonyLIV via HTTP proxy :80"
 
           RESPONSE=$(curl -sL \
             --http1.1 \
@@ -41,13 +54,10 @@ jobs:
             -H 'Origin: https://www.sonyliv.com' \
             "$API_URL")
 
-          echo "$RESPONSE" > api_response.json
-
           VIDEO_URL=$(echo "$RESPONSE" | jq -r '.videoURL // empty')
 
           if [ -z "$VIDEO_URL" ]; then
             echo "❌ videoURL not found"
-            cat api_response.json
             exit 1
           fi
 
@@ -58,23 +68,14 @@ jobs:
             exit 1
           fi
 
-          echo "✅ HDNEA extracted: $HDNEA"
           echo "HDNEA=$HDNEA" >> "$GITHUB_OUTPUT"
 
+      # 📝 STEP 3 — Update file
       - name: Update Slivtv.json
         run: |
-          FILE="Slivtv.json"
-          HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
+          sed -i "s|hdnea=[^&\"' ]*|${{ steps.fetch_hdnea.outputs.HDNEA }}|g" Slivtv.json
 
-          if [ ! -f "$FILE" ]; then
-            echo "❌ Slivtv.json not found"
-            exit 1
-          fi
-
-          sed -i "s|hdnea=[^&\"' ]*|$HDNEA|g" "$FILE"
-
-          echo "✅ File updated"
-
+      # 🚀 STEP 4 — Commit & push (NO PROXY HERE)
       - name: Commit & push
         run: |
           git config user.name "github-actions[bot]"
@@ -84,6 +85,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes"
           else
-            git commit -m "Auto-update SonyLIV hdnea (HTTP proxy :80)"
+            git commit -m "Auto-update SonyLIV hdnea (proxy safe)"
             git push
           fi
