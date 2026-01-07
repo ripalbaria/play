@@ -15,77 +15,51 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea with SOCKS5 Elite Proxies
+      - name: Fetch hdnea using curl (Browser Simulation with Proxy)
         id: fetch_hdnea
         run: |
-          # Fresh 2026 Elite Indian SOCKS5 Proxies
-          # These are better for bypassing VPN/Proxy detection (EPDblocked)
-          PROXIES=(
-            "socks5://103.174.102.10:1080"
-            "socks5://103.110.110.101:1080"
-            "socks5://45.249.50.137:4153"
-            "socks5://103.86.1.34:4145"
-          )
-
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          SUCCESS=false
+          PROXY_ADDR="154.61.76.24:8081"
 
-          for PROXY in "${PROXIES[@]}"; do
-            echo "---------------------------------------"
-            echo "Testing SOCKS5 Proxy: $PROXY"
-            
-            # Using --socks5-hostname to ensure DNS is also resolved through the proxy
-            if RESPONSE=$(curl -s -L --connect-timeout 20 --max-time 40 \
-              --proxy "$PROXY" \
-              -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
-              -H 'Referer: https://www.sonyliv.com/' \
-              -H 'Origin: https://www.sonyliv.com' \
-              "$API_URL"); then
+          echo "Fetching API via Proxy..."
+          RESPONSE=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
+            -H 'Accept: application/json, text/plain, */*' \
+            -H 'Referer: https://www.sonyliv.com/' \
+            -H 'Origin: https://www.sonyliv.com' \
+            "$API_URL")
 
-              # Check for SonyLIV's VPN/Proxy detection message
-              if [[ "$RESPONSE" == *"EPDblocked"* ]]; then
-                echo "Blocked by SonyLIV (EPDblocked API)."
-                continue
-              fi
-
-              VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
-
-              if [[ "$VIDEO_URL" == *"http"* ]]; then
-                echo "Success! Found videoURL using SOCKS5."
-                HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
-                
-                if [ ! -z "$HDNEA" ]; then
-                  echo "Extracted HDNEA: $HDNEA"
-                  echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
-                  SUCCESS=true
-                  break
-                fi
-              fi
-            else
-              echo "SOCKS5 Connection Timeout (Exit Code 28)."
-            fi
-            echo "Moving to next proxy..."
-          done
-
-          if [ "$SUCCESS" = false ]; then
-            echo "All SOCKS5 proxies failed. Please update your proxy list."
+          # Extract videoURL
+          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+          
+          if [ -z "$VIDEO_URL" ]; then
+            echo "Error: Could not get videoURL. Proxy might be down."
             exit 1
           fi
+
+          # Download .mpd via Proxy to get hdnea
+          MPD_CONTENT=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
+            "$VIDEO_URL")
+
+          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+          
+          if [ -z "$HDNEA" ]; then
+            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+          fi
+
+          echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          if [ -f "Slivtv.json" ]; then
-            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
-            echo "Slivtv.json updated."
-          else
-            echo "Slivtv.json file not found!"
-            exit 1
-          fi
+          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update (SOCKS5 Proxy)" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
