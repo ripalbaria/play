@@ -15,17 +15,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea with Proxy Rotation (Fixed Loop)
+      - name: Fetch hdnea with High-Uptime Proxies
         id: fetch_hdnea
         run: |
-          # Fresh 2026 Indian Proxy List
+          # Selection of more stable Indian Datacenter/Residential IPs
           PROXIES=(
-            "103.170.46.245:8080"
-            "108.165.152.59:80"
-            "43.249.225.174:80"
-            "139.59.1.14:3128"
-            "64.227.131.240:1080"
-            "14.195.222.145:80"
+            "49.36.212.181:80"
+            "103.119.144.114:8080"
+            "157.119.205.10:8080"
+            "103.81.105.114:80"
+            "202.131.144.155:80"
           )
 
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
@@ -35,61 +34,45 @@ jobs:
             echo "---------------------------------------"
             echo "Testing Proxy: $PROXY"
             
-            # The 'if' block prevents Exit Code 28 from crashing the script
-            if RESPONSE=$(curl -s -L --connect-timeout 5 --max-time 12 \
+            # Increased timeout slightly for Indian mobile/residential proxies
+            if RESPONSE=$(curl -s -L --connect-timeout 10 --max-time 20 \
               --proxy "$PROXY" \
               -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
               -H 'Referer: https://www.sonyliv.com/' \
+              -H 'Origin: https://www.sonyliv.com' \
               "$API_URL"); then
 
-              # Check if the response contains the videoURL
               VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
 
               if [[ "$VIDEO_URL" == *"http"* ]]; then
                 echo "Success! Found videoURL using $PROXY"
-                
-                # Extract hdnea from URL or MPD
                 HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
                 
-                if [ -z "$HDNEA" ]; then
-                  # Optional: fetch MPD if hdnea not in URL
-                  MPD_CONTENT=$(curl -s -L --connect-timeout 5 --proxy "$PROXY" "$VIDEO_URL") || true
-                  HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
-                fi
-
                 if [ ! -z "$HDNEA" ]; then
-                  echo "Extracted HDNEA: $HDNEA"
                   echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
                   SUCCESS=true
                   break
                 fi
               fi
             else
-              echo "Proxy $PROXY timed out or failed (Exit Code 28)."
+              echo "Proxy $PROXY timed out."
             fi
-            
-            echo "Moving to next proxy..."
+            echo "Moving to next..."
           done
 
           if [ "$SUCCESS" = false ]; then
-            echo "Error: All proxies in the list failed."
+            echo "All proxies in the list failed. SonyLIV may have updated their firewall."
             exit 1
           fi
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          if [ -f "Slivtv.json" ]; then
-            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
-            echo "Slivtv.json updated."
-          else
-            echo "File Slivtv.json not found!"
-            exit 1
-          fi
+          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV hdnea" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
