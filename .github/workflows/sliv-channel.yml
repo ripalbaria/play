@@ -1,4 +1,4 @@
-Name: Update SonyLIV Channels
+name: Update SonyLIV Channels
 
 on:
   schedule:
@@ -17,8 +17,7 @@ jobs:
 
       - name: Fetch with Proxy
         run: |
-          # 1. Fetch data using the Indian Amazon SOCKS5 Proxy
-          # Using proxy: 40.192.18.48:12874 (SOCKS5)
+          # SOCKS5 Amazon Proxy
           RESPONSE=$(curl -x "socks5://40.192.18.48:12874" -L --compressed \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             -H "Accept: */*" \
@@ -28,24 +27,19 @@ jobs:
             --max-time 40 \
             "https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729")
 
-          # 2. Extract the videoURL
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
           
-          # 3. SAFETY CHECK: Proceed only if videoURL is found
           if [ -n "$VIDEO_URL" ]; then
-            # Extract hdnea from the URL
             HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
-            
-            # Update Slivtv.json
             if [ -f "Slivtv.json" ]; then
               sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" "Slivtv.json"
               echo "SUCCESS: Token updated in Slivtv.json"
             else
-              echo "FAILURE: Slivtv.json file not found in repo."
+              echo "FAILURE: Slivtv.json not found."
               exit 1
             fi
           else
-            echo "FAILURE: Proxy returned no data or was blocked. Response was: $RESPONSE"
+            echo "FAILURE: Proxy blocked or no data."
             exit 1
           fi
 
