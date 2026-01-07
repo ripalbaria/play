@@ -1,8 +1,8 @@
-name: Update SonyLIV Channels (HTTP Proxy :80)
+name: Update SonyLIV Channels 
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 */1 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,60 +12,54 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 🎯 Fetch SonyLIV hdnea (proxy used ONLY here)
-      - name: Fetch hdnea via HTTP proxy :80
+      - name: Fetch hdnea using curl (Browser Simulation with Proxy)
         id: fetch_hdnea
         run: |
-          set -e
-
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
+          PROXY_ADDR="47.76.189.189:8899"
 
-          RESPONSE=$(curl -sL \
-            --http1.1 \
-            --proxy http://14.195.222.149:80 \
-            --proxy-insecure \
-            --insecure \
+          echo "Fetching API via Proxy..."
+          RESPONSE=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
             -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
             -H 'Accept: application/json, text/plain, */*' \
-            -H 'Accept-Language: en-US,en;q=0.9' \
             -H 'Referer: https://www.sonyliv.com/' \
             -H 'Origin: https://www.sonyliv.com' \
             "$API_URL")
 
-          VIDEO_URL=$(echo "$RESPONSE" | jq -r '.videoURL // empty')
-
+          # Extract videoURL
+          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+          
           if [ -z "$VIDEO_URL" ]; then
-            echo "❌ videoURL not found"
+            echo "Error: Could not get videoURL. Proxy might be down."
             exit 1
           fi
 
-          HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&]*' | head -1)
+          # Download .mpd via Proxy to get hdnea
+          MPD_CONTENT=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
+            "$VIDEO_URL")
 
+          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+          
           if [ -z "$HDNEA" ]; then
-            echo "❌ hdnea not found"
-            exit 1
+            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
           fi
 
-          echo "HDNEA=$HDNEA" >> "$GITHUB_OUTPUT"
+          echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
-      # 📝 Update JSON
       - name: Update Slivtv.json
         run: |
-          sed -i "s|hdnea=[^&\"' ]*|${{ steps.fetch_hdnea.outputs.HDNEA }}|g" Slivtv.json
+          HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
+          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
 
-      # 🚀 Commit & push (NO proxy here)
-      - name: Commit & push
+      - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-
-          if git diff --cached --quiet; then
-            echo "No changes"
-          else
-            git commit -m "Auto-update SonyLIV hdnea"
-            git push
-          fi
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
