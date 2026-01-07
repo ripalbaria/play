@@ -1,4 +1,4 @@
-name: Update SonyLIV Channels
+Name: Update SonyLIV Channels
 
 on:
   schedule:
@@ -17,13 +17,15 @@ jobs:
 
       - name: Fetch with Proxy
         run: |
-          # 1. Fetch data using the Indian Proxy
-          # Using proxy: 108.165.152.222:80
-          RESPONSE=$(curl -x "http://108.165.152.222:80" -L --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0" \
+          # 1. Fetch data using the Indian Amazon SOCKS5 Proxy
+          # Using proxy: 40.192.18.48:12874 (SOCKS5)
+          RESPONSE=$(curl -x "socks5://40.192.18.48:12874" -L --compressed \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             -H "Accept: */*" \
             -H "Accept-Encoding: gzip" \
             -H "Cache-Control: no-cache, no-store" \
+            --connect-timeout 20 \
+            --max-time 40 \
             "https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729")
 
           # 2. Extract the videoURL
@@ -43,7 +45,7 @@ jobs:
               exit 1
             fi
           else
-            echo "FAILURE: Proxy returned no data or was blocked."
+            echo "FAILURE: Proxy returned no data or was blocked. Response was: $RESPONSE"
             exit 1
           fi
 
