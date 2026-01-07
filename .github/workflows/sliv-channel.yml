@@ -19,10 +19,13 @@ jobs:
         id: fetch_hdnea
         run: |
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
+          # Note: Public proxies like this one often expire. 
+          # If it fails again, try a new IP.
           PROXY_ADDR="163.227.186.101:3128"
 
           echo "Fetching API via Proxy..."
-          RESPONSE=$(curl -s -L \
+          # Added -k to bypass SSL verification (Fixes Error 60)
+          RESPONSE=$(curl -s -k -L \
             --proxy "$PROXY_ADDR" \
             -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
             -H 'Accept: application/json, text/plain, */*' \
@@ -30,31 +33,41 @@ jobs:
             -H 'Origin: https://www.sonyliv.com' \
             "$API_URL")
 
-          # Extract videoURL
-          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+          # Improved extraction using Perl-regex for accuracy
+          VIDEO_URL=$(echo "$RESPONSE" | grep -oP '"videoURL":"\K[^"]+' | head -1)
           
           if [ -z "$VIDEO_URL" ]; then
-            echo "Error: Could not get videoURL. Proxy might be down."
+            echo "Error: Could not get videoURL. Proxy might be blocked or down."
             exit 1
           fi
 
-          # Download .mpd via Proxy to get hdnea
-          MPD_CONTENT=$(curl -s -L \
+          echo "Video URL found. Fetching token..."
+
+          # Download content via Proxy with -k flag
+          MPD_CONTENT=$(curl -s -k -L \
             --proxy "$PROXY_ADDR" \
             -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
             "$VIDEO_URL")
 
-          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+          # Look for hdnea in the response body or the URL itself
+          HDNEA=$(echo "$MPD_CONTENT" | grep -oP 'hdnea=[^&" ]+' | head -1)
           
           if [ -z "$HDNEA" ]; then
-            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+            HDNEA=$(echo "$VIDEO_URL" | grep -oP 'hdnea=[^&" ]+' | head -1)
           fi
 
+          if [ -z "$HDNEA" ]; then
+            echo "Error: HDNEA token not found."
+            exit 1
+          fi
+
+          echo "Successfully found token."
           echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
+          # Updates the hdnea token in your JSON file
           sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
 
       - name: Commit & Push
@@ -62,4 +75,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
+          # Only commit if changes were actually made
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
