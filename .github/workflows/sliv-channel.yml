@@ -17,14 +17,14 @@ jobs:
 
       - name: Fetch with Proxy
         run: |
-          # SOCKS5 Amazon Proxy
-          RESPONSE=$(curl -x "socks5://40.192.18.48:12874" -L --compressed \
+          # SOCKS5 Amazon Proxy with SSL Bypass (-k flag)
+          RESPONSE=$(curl -k -x "socks5://40.192.18.48:12874" -L --compressed \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
             -H "Accept: */*" \
             -H "Accept-Encoding: gzip" \
             -H "Cache-Control: no-cache, no-store" \
-            --connect-timeout 20 \
-            --max-time 40 \
+            --connect-timeout 30 \
+            --max-time 60 \
             "https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729")
 
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
@@ -39,7 +39,7 @@ jobs:
               exit 1
             fi
           else
-            echo "FAILURE: Proxy blocked or no data."
+            echo "FAILURE: Proxy returned no data or was blocked. Response: $RESPONSE"
             exit 1
           fi
 
