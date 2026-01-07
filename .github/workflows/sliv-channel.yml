@@ -20,33 +20,41 @@ jobs:
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
+      - name: Setup Cloudflare WARP
+        run: |
+          # Cloudflare repository setup
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          
+          # Install and Connect
+          sudo apt-get update && sudo apt-get install cloudflare-warp -y
+          warp-cli --accept-tos registration new
+          warp-cli --accept-tos connect
+          
+          # Wait for connection
+          sleep 10
+          echo "Connected IP:"
+          curl -s https://www.cloudflare.com/cdn-cgi/trace | grep ip
+
       - name: Fetch hdnea using yt-dlp
         id: fetch_hdnea
         run: |
           VIDEO_PAGE_URL="https://www.sonyliv.com/details/video/1000051729"
           
-          # IMPORTANT: Public proxies die fast. Replace this with a fresh India IP if it fails.
-          # Format: http://IP:PORT
-          PROXY="http://103.180.161.18:8080" 
-
-          echo "Fetching token using yt-dlp via Indian Proxy..."
-          
-          # --proxy: Uses the Indian IP to bypass geo-blocks
-          # --no-check-certificate: Fixes SSL Error 60 (like curl -k)
-          # --get-url: Only outputs the final manifest URL containing hdnea
-          FINAL_URL=$(yt-dlp --proxy "$PROXY" --no-check-certificate --get-url "$VIDEO_PAGE_URL")
+          echo "Fetching token through WARP tunnel..."
+          # WARP system traffic ko handle karta hai, isliye yt-dlp automatically use karega
+          # --no-check-certificate SSL issues fix karega
+          FINAL_URL=$(yt-dlp --no-check-certificate --get-url "$VIDEO_PAGE_URL")
 
           if [ -z "$FINAL_URL" ]; then
-            echo "Error: yt-dlp failed. The proxy might be offline or blocked by Sony."
+            echo "Error: Failed to fetch URL even with WARP."
             exit 1
           fi
 
-          # Extract the hdnea token from the authorized URL
           HDNEA=$(echo "$FINAL_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
           if [ -z "$HDNEA" ]; then
-            echo "Error: hdnea token not found in the final URL."
-            echo "Debug URL: $FINAL_URL"
+            echo "Error: hdnea token not found."
             exit 1
           fi
 
@@ -57,13 +65,11 @@ jobs:
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
           FILE="Slivtv.json"
-          
           if [ -f "$FILE" ]; then
-            # Replace old hdnea with the new one globally in the file
             sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" "$FILE"
-            echo "Successfully updated $FILE"
+            echo "Updated $FILE successfully."
           else
-            echo "Error: $FILE not found in repository."
+            echo "$FILE not found!"
             exit 1
           fi
 
@@ -72,11 +78,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          # Only commit if the file actually changed
-          if git diff --staged --quiet; then
-            echo "No changes detected in Slivtv.json"
-          else
-            git commit -m "Auto-update hdnea via Indian Proxy"
-            git push
-            echo "Changes pushed to repository."
-          fi
+          git diff --staged --quiet || (git commit -m "Auto-update via WARP" && git push)
