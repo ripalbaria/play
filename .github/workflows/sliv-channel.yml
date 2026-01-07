@@ -1,8 +1,8 @@
-name: Update SonyLIV Channels 
+name: Update SonyLIV Channels (HTTP Proxy :80)
 
 on:
   schedule:
-    - cron: '0 */1 * * *'
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -11,55 +11,79 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      http_proxy: http://14.195.222.149:80
+      https_proxy: http://14.195.222.149:80
+      CURL_HTTP_VERSION: 1.1
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea using curl (Browser Simulation with Proxy)
+      - name: Fetch hdnea via HTTP proxy :80
         id: fetch_hdnea
         run: |
-          API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          PROXY_ADDR="14.195.222.149:80"
+          set -e
 
-          echo "Fetching API via Proxy..."
-          RESPONSE=$(curl -s -L \
-            --proxy "$PROXY_ADDR" \
+          API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
+
+          echo "Fetching SonyLIV via HTTP proxy :80"
+
+          RESPONSE=$(curl -sL \
+            --http1.1 \
+            --proxy http://14.195.222.149:80 \
+            --proxy-insecure \
+            --insecure \
             -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
             -H 'Accept: application/json, text/plain, */*' \
+            -H 'Accept-Language: en-US,en;q=0.9' \
             -H 'Referer: https://www.sonyliv.com/' \
             -H 'Origin: https://www.sonyliv.com' \
             "$API_URL")
 
-          # Extract videoURL
-          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
-          
+          echo "$RESPONSE" > api_response.json
+
+          VIDEO_URL=$(echo "$RESPONSE" | jq -r '.videoURL // empty')
+
           if [ -z "$VIDEO_URL" ]; then
-            echo "Error: Could not get videoURL. Proxy might be down."
+            echo "❌ videoURL not found"
+            cat api_response.json
             exit 1
           fi
 
-          # Download .mpd via Proxy to get hdnea
-          MPD_CONTENT=$(curl -s -L \
-            --proxy "$PROXY_ADDR" \
-            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
-            "$VIDEO_URL")
+          HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&]*' | head -1)
 
-          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
-          
           if [ -z "$HDNEA" ]; then
-            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+            echo "❌ hdnea not found"
+            exit 1
           fi
 
-          echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
+          echo "✅ HDNEA extracted: $HDNEA"
+          echo "HDNEA=$HDNEA" >> "$GITHUB_OUTPUT"
 
       - name: Update Slivtv.json
         run: |
+          FILE="Slivtv.json"
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
 
-      - name: Commit & Push
+          if [ ! -f "$FILE" ]; then
+            echo "❌ Slivtv.json not found"
+            exit 1
+          fi
+
+          sed -i "s|hdnea=[^&\"' ]*|$HDNEA|g" "$FILE"
+
+          echo "✅ File updated"
+
+      - name: Commit & push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Auto-update SonyLIV hdnea (HTTP proxy :80)"
+            git push
+          fi
