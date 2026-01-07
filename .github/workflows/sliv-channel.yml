@@ -1,8 +1,8 @@
-Name: Update SonyLIV Channels 
+name: Update SonyLIV Channels 
 
 on:
   schedule:
-    - cron: '0 */1 * * *'   # Har 1 ghante mein
+    - cron: '0 */1 * * *'
   workflow_dispatch:
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
           PROXY="115.114.77.133:9090"
 
           echo "Fetching API using proxy: $PROXY"
-          RESPONSE=$(curl -s -L -x "$PROXY" \
+          RESPONSE=$(curl -s -k -L -x "$PROXY" \
             -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
             -H 'Accept: application/json, text/plain, */*' \
             -H 'Accept-Language: en-US,en;q=0.9' \
@@ -31,29 +31,24 @@ jobs:
             -H 'Connection: keep-alive' \
             "$API_URL")
 
-          # Save for debugging
           echo "$RESPONSE" > api_response.json
 
-          # Extract videoURL
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
           if [ -z "$VIDEO_URL" ]; then
-            echo "videoURL not found! Check if proxy is working or blocked."
+            echo "videoURL not found! Proxy might be blocked or dead."
             cat api_response.json
             exit 1
           fi
 
           echo "Found videoURL: $VIDEO_URL"
 
-          # Download .mpd file using proxy
-          MPD_CONTENT=$(curl -s -L -x "$PROXY" \
+          MPD_CONTENT=$(curl -s -k -L -x "$PROXY" \
             -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
             -H 'Referer: https://www.sonyliv.com/' \
             "$VIDEO_URL")
 
-          # Extract hdnea
           HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
           if [ -z "$HDNEA" ]; then
-            # Fallback: extract from videoURL itself
             HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
           fi
 
@@ -69,25 +64,13 @@ jobs:
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
           FILE="Slivtv.json"
-
-          if [ ! -f "$FILE" ]; then
-            echo "$FILE not found!"
-            exit 1
-          fi
-
-          # Replace hdnea in all links
+          if [ ! -f "$FILE" ]; then echo "$FILE not found!"; exit 1; fi
           sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" "$FILE"
-          echo "Updated $FILE with new hdnea"
+          echo "Updated $FILE"
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
-            git commit -m "Auto-update hdnea using Proxy"
-            git push
-            echo "Pushed!"
-          fi
+          git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
