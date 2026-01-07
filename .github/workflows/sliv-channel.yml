@@ -15,64 +15,51 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea using ScraperAPI
+      - name: Fetch hdnea using curl (Browser Simulation with Proxy)
         id: fetch_hdnea
         run: |
-          # Your ScraperAPI Key
-          API_KEY="e26053076e5a9c2f408e2567e957800"
-          
-          # SonyLIV API Target
-          TARGET_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          
-          # Removed country_code=in to avoid "Unauthorized" plan error
-          # Using premium=true for residential IP rotation
-          SCRAPER_URL="http://api.scraperapi.com?api_key=${API_KEY}&url=${TARGET_URL}&premium=true"
+          API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
+          PROXY_ADDR="43.251.107.130:80"
 
-          echo "Fetching SonyLIV via ScraperAPI Premium Residential..."
-
-          # High timeout (90s) is required for ScraperAPI internal retries
-          RESPONSE=$(curl -s -L --connect-timeout 30 --max-time 90 "$SCRAPER_URL")
-
-          # Check for Plan/Auth errors
-          if [[ "$RESPONSE" == *"Unauthorized"* ]]; then
-            echo "Error: API Key invalid or Plan restricted. Check ScraperAPI Dashboard."
-            exit 1
-          fi
+          echo "Fetching API via Proxy..."
+          RESPONSE=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
+            -H 'Accept: application/json, text/plain, */*' \
+            -H 'Referer: https://www.sonyliv.com/' \
+            -H 'Origin: https://www.sonyliv.com' \
+            "$API_URL")
 
           # Extract videoURL
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
-
-          if [[ "$VIDEO_URL" == *"http"* ]]; then
-            # Extract the token
-            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
-            
-            if [ ! -z "$HDNEA" ]; then
-              echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
-              echo "Success: Token extracted."
-            else
-              echo "Error: videoURL found but hdnea token missing."
-              exit 1
-            fi
-          else
-            echo "Error: Could not find valid videoURL in response."
-            echo "Full Response: $RESPONSE"
+          
+          if [ -z "$VIDEO_URL" ]; then
+            echo "Error: Could not get videoURL. Proxy might be down."
             exit 1
           fi
+
+          # Download .mpd via Proxy to get hdnea
+          MPD_CONTENT=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
+            "$VIDEO_URL")
+
+          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+          
+          if [ -z "$HDNEA" ]; then
+            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+          fi
+
+          echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          if [ -f "Slivtv.json" ]; then
-            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
-            echo "Slivtv.json updated."
-          else
-            echo "Slivtv.json not found!"
-            exit 1
-          fi
+          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV (ScraperAPI)" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
