@@ -15,51 +15,62 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea using curl (Browser Simulation with Proxy)
+      - name: Install yt-dlp
+        run: |
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+
+      - name: Fetch hdnea using yt-dlp
         id: fetch_hdnea
         run: |
-          API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          PROXY_ADDR="47.76.189.189:8899"
-
-          echo "Fetching API via Proxy..."
-          RESPONSE=$(curl -s -L \
-            --proxy "$PROXY_ADDR" \
-            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
-            -H 'Accept: application/json, text/plain, */*' \
-            -H 'Referer: https://www.sonyliv.com/' \
-            -H 'Origin: https://www.sonyliv.com' \
-            "$API_URL")
-
-          # Extract videoURL
-          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+          VIDEO_PAGE_URL="https://www.sonyliv.com/details/video/1000051729"
           
-          if [ -z "$VIDEO_URL" ]; then
-            echo "Error: Could not get videoURL. Proxy might be down."
+          echo "Fetching token using yt-dlp..."
+          
+          # yt-dlp gets the final manifest URL which contains the hdnea token
+          # --get-url retrieves the direct .mpd link after all redirects and authorization
+          FINAL_URL=$(yt-dlp --get-url "$VIDEO_PAGE_URL")
+
+          if [ -z "$FINAL_URL" ]; then
+            echo "Error: yt-dlp could not retrieve the URL."
             exit 1
           fi
 
-          # Download .mpd via Proxy to get hdnea
-          MPD_CONTENT=$(curl -s -L \
-            --proxy "$PROXY_ADDR" \
-            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
-            "$VIDEO_URL")
+          # Extract hdnea from the final URL
+          HDNEA=$(echo "$FINAL_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
-          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
-          
           if [ -z "$HDNEA" ]; then
-            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+            echo "Error: hdnea token not found in the manifest URL."
+            echo "URL Debug: $FINAL_URL"
+            exit 1
           fi
 
+          echo "Extracted hdnea: $HDNEA"
           echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
+          FILE="Slivtv.json"
+
+          if [ ! -f "$FILE" ]; then
+            echo "$FILE not found!"
+            exit 1
+          fi
+
+          # Replace hdnea in all links using sed
+          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" "$FILE"
+          echo "Updated $FILE with new hdnea"
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Auto-update hdnea via yt-dlp"
+            git push
+            echo "Pushed updates!"
+          fi
