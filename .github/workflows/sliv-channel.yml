@@ -15,16 +15,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea with High-Uptime Proxies
+      - name: Fetch hdnea with Elite Indian Proxies
         id: fetch_hdnea
         run: |
-          # Selection of more stable Indian Datacenter/Residential IPs
+          # 2026 Fresh Elite/High Anonymity Indian Proxies
           PROXIES=(
-            "49.36.212.181:80"
-            "103.119.144.114:8080"
-            "157.119.205.10:8080"
-            "103.81.105.114:80"
-            "202.131.144.155:80"
+            "103.110.110.101:80"
+            "103.241.227.106:8080"
+            "43.251.107.130:80"
+            "103.151.141.229:3128"
+            "182.72.115.150:80"
           )
 
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
@@ -32,12 +32,12 @@ jobs:
 
           for PROXY in "${PROXIES[@]}"; do
             echo "---------------------------------------"
-            echo "Testing Proxy: $PROXY"
+            echo "Testing Elite Proxy: $PROXY"
             
-            # Increased timeout slightly for Indian mobile/residential proxies
+            # Connection timeout 10s and Max time 20s for stability
             if RESPONSE=$(curl -s -L --connect-timeout 10 --max-time 20 \
               --proxy "$PROXY" \
-              -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
+              -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
               -H 'Referer: https://www.sonyliv.com/' \
               -H 'Origin: https://www.sonyliv.com' \
               "$API_URL"); then
@@ -45,7 +45,7 @@ jobs:
               VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
 
               if [[ "$VIDEO_URL" == *"http"* ]]; then
-                echo "Success! Found videoURL using $PROXY"
+                echo "Success! Working Proxy Found: $PROXY"
                 HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
                 
                 if [ ! -z "$HDNEA" ]; then
@@ -55,13 +55,13 @@ jobs:
                 fi
               fi
             else
-              echo "Proxy $PROXY timed out."
+              echo "Proxy $PROXY timed out or refused connection."
             fi
-            echo "Moving to next..."
+            echo "Moving to next Elite Proxy..."
           done
 
           if [ "$SUCCESS" = false ]; then
-            echo "All proxies in the list failed. SonyLIV may have updated their firewall."
+            echo "Saare Elite proxies fail ho gaye. SonyLIV ne IPs block kar diye hain."
             exit 1
           fi
 
@@ -75,4 +75,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV (Elite Proxy)" && git push)
