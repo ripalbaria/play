@@ -15,64 +15,66 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea with Elite Indian Proxies
+      - name: Fetch hdnea using Authenticated Proxy
         id: fetch_hdnea
         run: |
-          # 2026 Fresh Elite/High Anonymity Indian Proxies
-          PROXIES=(
-            "103.110.110.101:80"
-            "103.241.227.106:8080"
-            "43.251.107.130:80"
-            "103.151.141.229:3128"
-            "182.72.115.150:80"
-          )
-
+          # Aapki Private Proxy Detail
+          PROXY_URL="http://drrhuszw:ydswngc3lhmv@142.111.48.253:7030/"
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          SUCCESS=false
 
-          for PROXY in "${PROXIES[@]}"; do
-            echo "---------------------------------------"
-            echo "Testing Elite Proxy: $PROXY"
+          echo "Fetching SonyLIV API via Private Authenticated Proxy..."
+
+          # --proxy-anyauth handle karega username/password authentication ko
+          # --retry 2 se agar network issue ho toh auto-retry karega
+          RESPONSE=$(curl -s -L --connect-timeout 15 --max-time 30 --retry 2 \
+            --proxy "$PROXY_URL" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
+            -H 'Referer: https://www.sonyliv.com/' \
+            -H 'Origin: https://www.sonyliv.com' \
+            "$API_URL")
+
+          # Check if response is empty or blocked
+          if [ -z "$RESPONSE" ]; then
+            echo "Error: Proxy se koi response nahi mila."
+            exit 1
+          fi
+
+          # Extract videoURL
+          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+
+          if [[ "$VIDEO_URL" == *"http"* ]]; then
+            echo "Success! Found videoURL."
             
-            # Connection timeout 10s and Max time 20s for stability
-            if RESPONSE=$(curl -s -L --connect-timeout 10 --max-time 20 \
-              --proxy "$PROXY" \
-              -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
-              -H 'Referer: https://www.sonyliv.com/' \
-              -H 'Origin: https://www.sonyliv.com' \
-              "$API_URL"); then
-
-              VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
-
-              if [[ "$VIDEO_URL" == *"http"* ]]; then
-                echo "Success! Working Proxy Found: $PROXY"
-                HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
-                
-                if [ ! -z "$HDNEA" ]; then
-                  echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
-                  SUCCESS=true
-                  break
-                fi
-              fi
+            # Extract hdnea token
+            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+            
+            if [ ! -z "$HDNEA" ]; then
+              echo "Extracted HDNEA: $HDNEA"
+              echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
             else
-              echo "Proxy $PROXY timed out or refused connection."
+              echo "Error: videoURL toh mila par hdnea token nahi mila."
+              exit 1
             fi
-            echo "Moving to next Elite Proxy..."
-          done
-
-          if [ "$SUCCESS" = false ]; then
-            echo "Saare Elite proxies fail ho gaye. SonyLIV ne IPs block kar diye hain."
+          else
+            echo "Error: SonyLIV API ne block kar diya ya galat data bheja."
+            echo "API Response: $RESPONSE"
             exit 1
           fi
 
       - name: Update Slivtv.json
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
+          if [ -f "Slivtv.json" ]; then
+            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" Slivtv.json
+            echo "Slivtv.json updated with new token."
+          else
+            echo "Error: Slivtv.json file missing!"
+            exit 1
+          fi
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV (Elite Proxy)" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV (Auth Proxy)" && git push)
