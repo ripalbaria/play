@@ -15,59 +15,42 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea with Elite Indian Proxies
+      - name: Fetch hdnea using curl (Browser Simulation with Proxy)
         id: fetch_hdnea
         run: |
-          # Elite Indian Proxies only (No US proxies)
-          PROXIES=(
-            "45.249.50.137:4153"
-            "103.86.1.34:4145"
-            "103.170.46.245:8080"
-            "202.83.30.96:80"
-          )
-
           API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-          SUCCESS=false
+          PROXY_ADDR="40.192.18.48:9105"
 
-          for PROXY in "${PROXIES[@]}"; do
-            echo "---------------------------------------"
-            echo "Testing Elite Indian Proxy: $PROXY"
-            
-            # Using --connect-timeout 10 for slower Indian residential nodes
-            if RESPONSE=$(curl -s -L --connect-timeout 10 --max-time 25 \
-              --proxy "$PROXY" \
-              -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
-              -H 'Referer: https://www.sonyliv.com/' \
-              -H 'Origin: https://www.sonyliv.com' \
-              "$API_URL"); then
+          echo "Fetching API via Proxy..."
+          RESPONSE=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
+            -H 'Accept: application/json, text/plain, */*' \
+            -H 'Referer: https://www.sonyliv.com/' \
+            -H 'Origin: https://www.sonyliv.com' \
+            "$API_URL")
 
-              # Agar response mein "EPDblocked" hai toh skip karo
-              if [[ "$RESPONSE" == *"EPDblocked"* ]]; then
-                echo "Blocked by SonyLIV API. Skipping..."
-                continue
-              fi
-
-              VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
-
-              if [[ "$VIDEO_URL" == *"http"* ]]; then
-                echo "Success! Found videoURL using $PROXY"
-                HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
-                
-                if [ ! -z "$HDNEA" ]; then
-                  echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
-                  SUCCESS=true
-                  break
-                fi
-              fi
-            else
-              echo "Proxy $PROXY connection failed."
-            fi
-          done
-
-          if [ "$SUCCESS" = false ]; then
-            echo "All Elite Indian proxies failed. API is detecting VPN/Proxy."
+          # Extract videoURL
+          VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
+          
+          if [ -z "$VIDEO_URL" ]; then
+            echo "Error: Could not get videoURL. Proxy might be down."
             exit 1
           fi
+
+          # Download .mpd via Proxy to get hdnea
+          MPD_CONTENT=$(curl -s -L \
+            --proxy "$PROXY_ADDR" \
+            -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' \
+            "$VIDEO_URL")
+
+          HDNEA=$(echo "$MPD_CONTENT" | grep -o 'hdnea=[^&" ]*' | head -1)
+          
+          if [ -z "$HDNEA" ]; then
+            HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*')
+          fi
+
+          echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update Slivtv.json
         run: |
@@ -79,4 +62,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea (Elite IN Proxy)" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update hdnea" && git push)
