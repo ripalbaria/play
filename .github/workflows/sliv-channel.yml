@@ -1,4 +1,4 @@
-name: Update SonyLIV Channels (HTTP :80 + India Check)
+name: Update SonyLIV Channels (HTTP Proxy :80)
 
 on:
   schedule:
@@ -15,26 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 🔍 STEP 1 — Verify proxy exit country (ONLY curl uses proxy)
-      - name: Verify proxy is India
-        run: |
-          set -e
-          GEO=$(curl -s \
-            --http1.1 \
-            --proxy http://14.195.222.149:80 \
-            --proxy-insecure \
-            https://ipinfo.io/country || true)
-
-          echo "Proxy country: $GEO"
-
-          if [ "$GEO" != "IN" ]; then
-            echo "❌ Proxy not India / leaking"
-            exit 1
-          fi
-
-          echo "✅ Proxy confirmed India"
-
-      # 🎯 STEP 2 — Fetch SonyLIV hdnea
+      # 🎯 Fetch SonyLIV hdnea (proxy used ONLY here)
       - name: Fetch hdnea via HTTP proxy :80
         id: fetch_hdnea
         run: |
@@ -70,12 +51,12 @@ jobs:
 
           echo "HDNEA=$HDNEA" >> "$GITHUB_OUTPUT"
 
-      # 📝 STEP 3 — Update file
+      # 📝 Update JSON
       - name: Update Slivtv.json
         run: |
           sed -i "s|hdnea=[^&\"' ]*|${{ steps.fetch_hdnea.outputs.HDNEA }}|g" Slivtv.json
 
-      # 🚀 STEP 4 — Commit & push (NO PROXY HERE)
+      # 🚀 Commit & push (NO proxy here)
       - name: Commit & push
         run: |
           git config user.name "github-actions[bot]"
@@ -85,6 +66,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes"
           else
-            git commit -m "Auto-update SonyLIV hdnea (proxy safe)"
+            git commit -m "Auto-update SonyLIV hdnea"
             git push
           fi
