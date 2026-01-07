@@ -25,23 +25,28 @@ jobs:
         run: |
           VIDEO_PAGE_URL="https://www.sonyliv.com/details/video/1000051729"
           
-          echo "Fetching token using yt-dlp..."
+          # IMPORTANT: Public proxies die fast. Replace this with a fresh India IP if it fails.
+          # Format: http://IP:PORT
+          PROXY="http://103.180.161.18:8080" 
+
+          echo "Fetching token using yt-dlp via Indian Proxy..."
           
-          # yt-dlp gets the final manifest URL which contains the hdnea token
-          # --get-url retrieves the direct .mpd link after all redirects and authorization
-          FINAL_URL=$(yt-dlp --get-url "$VIDEO_PAGE_URL")
+          # --proxy: Uses the Indian IP to bypass geo-blocks
+          # --no-check-certificate: Fixes SSL Error 60 (like curl -k)
+          # --get-url: Only outputs the final manifest URL containing hdnea
+          FINAL_URL=$(yt-dlp --proxy "$PROXY" --no-check-certificate --get-url "$VIDEO_PAGE_URL")
 
           if [ -z "$FINAL_URL" ]; then
-            echo "Error: yt-dlp could not retrieve the URL."
+            echo "Error: yt-dlp failed. The proxy might be offline or blocked by Sony."
             exit 1
           fi
 
-          # Extract hdnea from the final URL
+          # Extract the hdnea token from the authorized URL
           HDNEA=$(echo "$FINAL_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
           if [ -z "$HDNEA" ]; then
-            echo "Error: hdnea token not found in the manifest URL."
-            echo "URL Debug: $FINAL_URL"
+            echo "Error: hdnea token not found in the final URL."
+            echo "Debug URL: $FINAL_URL"
             exit 1
           fi
 
@@ -52,25 +57,26 @@ jobs:
         run: |
           HDNEA="${{ steps.fetch_hdnea.outputs.HDNEA }}"
           FILE="Slivtv.json"
-
-          if [ ! -f "$FILE" ]; then
-            echo "$FILE not found!"
+          
+          if [ -f "$FILE" ]; then
+            # Replace old hdnea with the new one globally in the file
+            sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" "$FILE"
+            echo "Successfully updated $FILE"
+          else
+            echo "Error: $FILE not found in repository."
             exit 1
           fi
-
-          # Replace hdnea in all links using sed
-          sed -i "s|hdnea=[^&\"' ]*|${HDNEA}|g" "$FILE"
-          echo "Updated $FILE with new hdnea"
 
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Slivtv.json
+          # Only commit if the file actually changed
           if git diff --staged --quiet; then
-            echo "No changes"
+            echo "No changes detected in Slivtv.json"
           else
-            git commit -m "Auto-update hdnea via yt-dlp"
+            git commit -m "Auto-update hdnea via Indian Proxy"
             git push
-            echo "Pushed updates!"
+            echo "Changes pushed to repository."
           fi
