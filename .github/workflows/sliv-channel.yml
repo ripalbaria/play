@@ -2,8 +2,8 @@ name: SonyLIV Auto Update
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
-  workflow_dispatch:
+    - cron: '0 */4 * * *'   # Har 4 ghante mein auto-run
+  workflow_dispatch:        # Manual run karne ke liye button
 
 jobs:
   update-tokens:
@@ -17,12 +17,13 @@ jobs:
 
       - name: Fetch hdnea (Bypass via Indian VPS)
         id: fetch_hdnea
+        env:
+          # Secrets ko environment variables mein map kiya gaya hai
+          PROXY: ${{ secrets.SONY_PROXY }}
+          API_URL: ${{ secrets.SONY_API_URL }}
         run: |
-          PROXY="http://140.245.25.215:3128"
-          API_URL="https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
-
           echo "Connecting to Indian VPS Proxy..."
-          # Connect timeout ko 120s rakha hai slow VPS ke liye
+          # curl command jo secrets use karke token fetch karega
           RESPONSE=$(curl -s -L -x "$PROXY" \
             --connect-timeout 120 \
             --retry 5 \
@@ -32,26 +33,28 @@ jobs:
             "$API_URL")
 
           if [ -z "$RESPONSE" ]; then
-            echo "Error: Timeout or Empty Response. Check if VPS firewalld is stopped."
+            echo "Error: Timeout or Empty Response. Check if VPS is running."
             exit 1
           fi
 
+          # Response se Video URL aur hdnea token extract karna
           echo "$RESPONSE" > api_response.json
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
           HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
           if [ -z "$HDNEA" ]; then
-            echo "Error: Token extraction failed."
+            echo "Error: Token extraction failed. Response might be geo-blocked."
             exit 1
           fi
 
-          echo "Success! HDNEA=$HDNEA"
+          echo "Success! Token found."
+          # Token ko agle step ke liye output variable mein save karein
           echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update Slivtv.json
         run: |
           NEW_TOKEN="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          # Sabhi purane hdnea tokens ko replace karein
+          # Slivtv.json mein sabhi purane tokens ko naye token se replace karna
           sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" Slivtv.json
           echo "Updated Slivtv.json successfully."
 
@@ -60,4 +63,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV" && git push)
+          # Agar koi change nahi hai toh push skip karein
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV token" && git push)
