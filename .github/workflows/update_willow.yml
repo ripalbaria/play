@@ -12,29 +12,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract and Format Willow
+      - name: Update Willow Sports Entry
         run: |
-          # 1. Download the latest M3U
+          # 1. Download the latest M3U source
           curl -s https://raw.githubusercontent.com/Love4vn/love4vn/refs/heads/main/S_check.m3u -o playlist.m3u
           
-          # 2. Use grep to find the line number of Willow Sports (SD)
-          LINE_NUM=$(grep -n "Willow Sports (SD)" playlist.m3u | cut -d: -f1 | head -n 1)
+          # 2. Extract the exact block (including logo, props, and mpd link)
+          # We search for the name and grab the 1 line before and 4 lines after
+          # We use 'printf' to ensure actual newlines are preserved in the variable
+          BLOCK=$(grep -B 1 -A 4 "Willow Sports (SD)" playlist.m3u)
           
-          if [ -z "$LINE_NUM" ]; then
-            echo "Channel not found"
+          if [ -z "$BLOCK" ]; then
+            echo "Willow Sports not found. Skipping."
             exit 0
           fi
 
-          # 3. Extract specific lines relative to the name
-          # Line +1 is usually license type, +2 is license key, +3 is the URL
-          LICENSE_KEY=$(sed -n "$((LINE_NUM+2))p" playlist.m3u | cut -d'=' -f2)
-          STREAM_URL=$(sed -n "$((LINE_NUM+3))p" playlist.m3u | xargs)
-
-          # 4. Update Slivtv.json
-          # This removes the old Willow entry and adds a fresh one with CLEAN formatting
-          # It puts the license in a way that players can often read or keeps the URL clean
-          jq --arg key "$LICENSE_KEY" --arg url "$STREAM_URL" \
-          'map(select(.name != "Willow Sports (SD)")) + [{"name": "Willow Sports (SD)", "url": $url, "license_key": $key}]' \
+          # 3. Clean Slivtv.json and add the new entry
+          # map(select(...)) deletes any old Willow entry first to prevent duplicates
+          # We use --arg to safely pass the multi-line block into the JSON
+          jq --arg content "$BLOCK" \
+          'map(select(.name != "Willow Sports (SD)")) + [{"logo": "https://i.ibb.co.com/BCHXWwH/Shareext-champion-league.jpg", "name": "Willow Sports (SD)", "url": $content}]' \
           Slivtv.json > tmp.json && mv tmp.json Slivtv.json
 
       - name: Commit and Push
@@ -42,5 +39,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git commit -m "Update Willow: Clean Format" || exit 0
+          git commit -m "Overwrite Willow Sports (SD) with exact block format" || exit 0
           git push
