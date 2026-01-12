@@ -1,0 +1,27 @@
+- name: Fetch hdnea (Detailed Debugging)
+  run: |
+    echo "Connecting to Indian VPS Proxy: 80.225.242.97..."
+    
+    # Detailed log ke liye output ko file mein save karenge
+    # -v (verbose) se poori connection details dikhengi
+    # -i se response headers (Location, Server, Status) dikhenge
+    
+    RESPONSE=$(curl -v -i -s -x http://sony:bypass123@80.225.242.97:3128 \
+      -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+      -H "Origin: https://www.sonyliv.com" \
+      --max-time 30 \
+      "https://dai.google.com/linear/key/sony_url_here") # Apni asli URL dalein
+
+    echo "--- FULL LOG START ---"
+    echo "$RESPONSE"
+    echo "--- FULL LOG END ---"
+
+    # Check if blocked
+    if echo "$RESPONSE" | grep -q "geo-blocked"; then
+      echo "CRITICAL: IP is detected as non-Indian by Sony's CDN."
+      exit 1
+    elif echo "$RESPONSE" | grep -q "403"; then
+      echo "CRITICAL: Access Forbidden. Proxy might be blacklisted."
+      exit 1
+    fi
+
