@@ -19,6 +19,7 @@ jobs:
           
           # 2. Extract the exact block (including props and url)
           # We search for the name and get 4 lines after it
+          # This captures #KODIPROP and the .mpd link
           BLOCK=$(grep -A 4 "Willow Sports (SD)" playlist.m3u)
           
           if [ -z "$BLOCK" ]; then
@@ -26,32 +27,19 @@ jobs:
             exit 0
           fi
 
-          # 3. Use a temporary python script to perfectly format the JSON
-          # This ensures real newlines, not \n text
-          python3 -c "
-          import json
-          with open('Slivtv.json', 'r') as f:
-              data = json.load(f)
-          
-          # Remove any old Willow entry
-          data = [item for item in data if item.get('name') != 'Willow Sports (SD)']
-          
-          # Add the fresh entry with real multi-line formatting
-          new_entry = {
-              'logo': 'https://i.ibb.co.com/BCHXWwH/Shareext-champion-league.jpg',
-              'name': 'Willow Sports (SD)',
-              'url': \"$BLOCK\"
-          }
-          data.append(new_entry)
-          
-          with open('Slivtv.json', 'w') as f:
-              json.dump(data, f, indent=2)
-          "
+          # 3. Use jq to delete the old entry and add the fresh one
+          # We use --arg to safely pass the block so newlines are handled correctly
+          jq --arg content "$BLOCK" \
+          'map(select(.name != "Willow Sports (SD)")) + 
+          [{"logo": "https://i.ibb.co.com/BCHXWwH/Shareext-champion-league.jpg", 
+            "name": "Willow Sports (SD)", 
+            "url": $content}]' \
+          Slivtv.json > tmp.json && mv tmp.json Slivtv.json
 
       - name: Commit and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git commit -m "Overwrite Willow with proper formatting" || exit 0
+          git commit -m "Overwrite Willow with clean multi-line format" || exit 0
           git push
