@@ -2,44 +2,40 @@ name: Update Willow Sports Channel
 
 on:
   schedule:
-    # Runs every 20 minutes
+    # Runs every 20 minutes (GitHub minimum is ~5-10 mins)
     - cron: '*/20 * * * *'
-  workflow_dispatch: # Allows you to run it manually for testing
+  workflow_dispatch:
 
 jobs:
-  update-link:
+  update-channel:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Willow Sports (SD) URL
+      - name: Extract Full Willow Block
         run: |
-          # Download the M3U file
+          # 1. Download the M3U
           curl -s https://raw.githubusercontent.com/Love4vn/love4vn/refs/heads/main/S_check.m3u -o playlist.m3u
           
-          # Extract the line immediately following the "Willow Sports (SD)" name
-          NEW_URL=$(grep -A 1 "Willow Sports (SD)" playlist.m3u | grep "http" | xargs)
+          # 2. Extract the block: Name line + next 4 lines (KODIPROPs and URL)
+          # We search for the specific name and grab the context around it
+          BLOCK=$(grep -A 4 "Willow Sports (SD)" playlist.m3u)
           
-          if [ -z "$NEW_URL" ]; then
-            echo "URL not found, skipping update."
-            exit 0
-          fi
-          
-          # Check if the URL already exists in Slivtv.json to avoid duplicates
-          if grep -q "$NEW_URL" Slivtv.json; then
-            echo "URL already exists in Slivtv.json. No changes needed."
+          if [ -z "$BLOCK" ]; then
+            echo "Willow Sports block not found. Skipping."
             exit 0
           fi
 
-          # Append the new channel to the JSON array (assuming Slivtv.json is a list)
-          # This creates an object and adds it to the end of the existing list
-          jq --arg url "$NEW_URL" '. += [{"name": "Willow Sports (SD)", "url": $url}]' Slivtv.json > tmp.json && mv tmp.json Slivtv.json
+          # 3. Format the block for JSON (preserving newlines)
+          # We use jq to safely append this block to the end of the array
+          # This script assumes Slivtv.json is an array of objects [{}, {}]
+          jq --arg content "$BLOCK" '. += [{"name": "Willow Sports (SD)", "url": $content}]' Slivtv.json > tmp.json && mv tmp.json Slivtv.json
 
-      - name: Commit and Push changes
+      - name: Commit and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git commit -m "Update Willow Sports (SD) link" || exit 0
+          git commit -m "Refresh Willow Sports (SD) complete block" || exit 0
           git push
