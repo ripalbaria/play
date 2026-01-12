@@ -14,11 +14,11 @@ jobs:
 
       - name: Update Willow Sports Entry
         run: |
-          # 1. Download the M3U
+          # 1. Download the M3U source
           curl -s https://raw.githubusercontent.com/Love4vn/love4vn/refs/heads/main/S_check.m3u -o playlist.m3u
           
-          # 2. Extract the full block (EXTINF line + logo + 2 KODIPROP lines + URL)
-          # This grabs the 4 lines after the match to include the .mpd link
+          # 2. Extract the exact block (1 line before name, 4 lines after)
+          # This captures #EXTINF, #KODIPROP license lines, and the .mpd URL
           BLOCK=$(grep -B 1 -A 4 "Willow Sports (SD)" playlist.m3u)
           
           if [ -z "$BLOCK" ]; then
@@ -26,9 +26,9 @@ jobs:
             exit 0
           fi
 
-          # 3. Clean Slivtv.json and Add the single fresh entry
-          # First, it filters out any existing object where name is "Willow Sports (SD)"
-          # Then, it appends the new block into the 'url' field
+          # 3. Use jq to overwrite the channel
+          # map(select(...)) removes any existing entry named Willow Sports (SD)
+          # We then append the fresh entry with the formatted block
           jq --arg content "$BLOCK" \
           'map(select(.name != "Willow Sports (SD)")) + [{"name": "Willow Sports (SD)", "url": $content}]' \
           Slivtv.json > tmp.json && mv tmp.json Slivtv.json
@@ -38,5 +38,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git commit -m "Overwrite Willow Sports (SD) with fresh link" || exit 0
+          git commit -m "Overwrite Willow Sports (SD) with fresh formatted block" || exit 0
           git push
