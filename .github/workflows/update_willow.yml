@@ -2,7 +2,6 @@ name: Update Willow Sports Channel
 
 on:
   schedule:
-    # Runs every 20 minutes (GitHub minimum is ~5-10 mins)
     - cron: '*/20 * * * *'
   workflow_dispatch:
 
@@ -13,29 +12,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract Full Willow Block
+      - name: Update Willow Sports Entry
         run: |
           # 1. Download the M3U
           curl -s https://raw.githubusercontent.com/Love4vn/love4vn/refs/heads/main/S_check.m3u -o playlist.m3u
           
-          # 2. Extract the block: Name line + next 4 lines (KODIPROPs and URL)
-          # We search for the specific name and grab the context around it
-          BLOCK=$(grep -A 4 "Willow Sports (SD)" playlist.m3u)
+          # 2. Extract the full block (EXTINF line + logo + 2 KODIPROP lines + URL)
+          # This grabs the 4 lines after the match to include the .mpd link
+          BLOCK=$(grep -B 1 -A 4 "Willow Sports (SD)" playlist.m3u)
           
           if [ -z "$BLOCK" ]; then
             echo "Willow Sports block not found. Skipping."
             exit 0
           fi
 
-          # 3. Format the block for JSON (preserving newlines)
-          # We use jq to safely append this block to the end of the array
-          # This script assumes Slivtv.json is an array of objects [{}, {}]
-          jq --arg content "$BLOCK" '. += [{"name": "Willow Sports (SD)", "url": $content}]' Slivtv.json > tmp.json && mv tmp.json Slivtv.json
+          # 3. Clean Slivtv.json and Add the single fresh entry
+          # First, it filters out any existing object where name is "Willow Sports (SD)"
+          # Then, it appends the new block into the 'url' field
+          jq --arg content "$BLOCK" \
+          'map(select(.name != "Willow Sports (SD)")) + [{"name": "Willow Sports (SD)", "url": $content}]' \
+          Slivtv.json > tmp.json && mv tmp.json Slivtv.json
 
       - name: Commit and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git commit -m "Refresh Willow Sports (SD) complete block" || exit 0
+          git commit -m "Overwrite Willow Sports (SD) with fresh link" || exit 0
           git push
