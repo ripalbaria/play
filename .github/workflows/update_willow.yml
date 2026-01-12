@@ -12,32 +12,46 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Update Willow Sports Entry
+      - name: Overwrite Willow Entry
         run: |
-          # 1. Download the latest M3U source
+          # 1. Download the M3U source
           curl -s https://raw.githubusercontent.com/Love4vn/love4vn/refs/heads/main/S_check.m3u -o playlist.m3u
           
-          # 2. Extract the exact block (including logo, props, and mpd link)
-          # We search for the name and grab the 1 line before and 4 lines after
-          # We use 'printf' to ensure actual newlines are preserved in the variable
-          BLOCK=$(grep -B 1 -A 4 "Willow Sports (SD)" playlist.m3u)
+          # 2. Extract the exact block (including props and url)
+          # We search for the name and get 4 lines after it
+          BLOCK=$(grep -A 4 "Willow Sports (SD)" playlist.m3u)
           
           if [ -z "$BLOCK" ]; then
             echo "Willow Sports not found. Skipping."
             exit 0
           fi
 
-          # 3. Clean Slivtv.json and add the new entry
-          # map(select(...)) deletes any old Willow entry first to prevent duplicates
-          # We use --arg to safely pass the multi-line block into the JSON
-          jq --arg content "$BLOCK" \
-          'map(select(.name != "Willow Sports (SD)")) + [{"logo": "https://i.ibb.co.com/BCHXWwH/Shareext-champion-league.jpg", "name": "Willow Sports (SD)", "url": $content}]' \
-          Slivtv.json > tmp.json && mv tmp.json Slivtv.json
+          # 3. Use a temporary python script to perfectly format the JSON
+          # This ensures real newlines, not \n text
+          python3 -c "
+          import json
+          with open('Slivtv.json', 'r') as f:
+              data = json.load(f)
+          
+          # Remove any old Willow entry
+          data = [item for item in data if item.get('name') != 'Willow Sports (SD)']
+          
+          # Add the fresh entry with real multi-line formatting
+          new_entry = {
+              'logo': 'https://i.ibb.co.com/BCHXWwH/Shareext-champion-league.jpg',
+              'name': 'Willow Sports (SD)',
+              'url': \"$BLOCK\"
+          }
+          data.append(new_entry)
+          
+          with open('Slivtv.json', 'w') as f:
+              json.dump(data, f, indent=2)
+          "
 
       - name: Commit and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git commit -m "Overwrite Willow Sports (SD) with exact block format" || exit 0
+          git commit -m "Overwrite Willow with proper formatting" || exit 0
           git push
