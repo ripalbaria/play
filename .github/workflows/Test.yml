@@ -1,0 +1,33 @@
+name: Proxy Test Log
+
+on:
+  workflow_dispatch: # Isse aap manually button daba kar test kar sakenge
+
+jobs:
+  debug-proxy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detailed Proxy & Geo-Location Test
+        run: |
+          echo "Starting Detailed Test for Proxy: 80.225.242.97"
+          echo "-----------------------------------------------"
+
+          # 1. Basic Connectivity Test (Google)
+          echo "TEST 1: Connectivity Check"
+          curl -I -s -x http://sony:bypass123@80.225.242.97:3128 https://www.google.com | grep "HTTP/" || echo "Proxy Connection Failed"
+          echo "-----------------------------------------------"
+
+          # 2. IP Location Check (Sony ke database ke hisab se)
+          echo "TEST 2: Geo-Location Check"
+          # Isse pata chalega ki Sony aapko kis country ka dekh raha hai
+          curl -s -x http://sony:bypass123@80.225.242.97:3128 https://ifconfig.co/json
+          echo -e "\n-----------------------------------------------"
+
+          # 3. Sony Token Fetch Test (With Full Header Logs)
+          echo "TEST 3: Sony Token Fetch Verbose Log"
+          # -v (Verbose) se poori detail dikhegi ki kahan block ho raha hai
+          # 'URL_HERE' ki jagah apni asli token URL dal dena
+          curl -v -i -x http://sony:bypass123@80.225.242.97:3128 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            -H "Origin: https://www.sonyliv.com" \
+            "URL_HERE"
