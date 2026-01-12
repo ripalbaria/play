@@ -12,25 +12,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Update Willow Sports Entry
+      - name: Extract and Format Willow
         run: |
-          # 1. Download the M3U source
+          # 1. Download the latest M3U
           curl -s https://raw.githubusercontent.com/Love4vn/love4vn/refs/heads/main/S_check.m3u -o playlist.m3u
           
-          # 2. Extract the exact block (1 line before name, 4 lines after)
-          # This captures #EXTINF, #KODIPROP license lines, and the .mpd URL
-          BLOCK=$(grep -B 1 -A 4 "Willow Sports (SD)" playlist.m3u)
+          # 2. Use grep to find the line number of Willow Sports (SD)
+          LINE_NUM=$(grep -n "Willow Sports (SD)" playlist.m3u | cut -d: -f1 | head -n 1)
           
-          if [ -z "$BLOCK" ]; then
-            echo "Willow Sports block not found. Skipping."
+          if [ -z "$LINE_NUM" ]; then
+            echo "Channel not found"
             exit 0
           fi
 
-          # 3. Use jq to overwrite the channel
-          # map(select(...)) removes any existing entry named Willow Sports (SD)
-          # We then append the fresh entry with the formatted block
-          jq --arg content "$BLOCK" \
-          'map(select(.name != "Willow Sports (SD)")) + [{"name": "Willow Sports (SD)", "url": $content}]' \
+          # 3. Extract specific lines relative to the name
+          # Line +1 is usually license type, +2 is license key, +3 is the URL
+          LICENSE_KEY=$(sed -n "$((LINE_NUM+2))p" playlist.m3u | cut -d'=' -f2)
+          STREAM_URL=$(sed -n "$((LINE_NUM+3))p" playlist.m3u | xargs)
+
+          # 4. Update Slivtv.json
+          # This removes the old Willow entry and adds a fresh one with CLEAN formatting
+          # It puts the license in a way that players can often read or keeps the URL clean
+          jq --arg key "$LICENSE_KEY" --arg url "$STREAM_URL" \
+          'map(select(.name != "Willow Sports (SD)")) + [{"name": "Willow Sports (SD)", "url": $url, "license_key": $key}]' \
           Slivtv.json > tmp.json && mv tmp.json Slivtv.json
 
       - name: Commit and Push
@@ -38,5 +42,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add Slivtv.json
-          git commit -m "Overwrite Willow Sports (SD) with fresh formatted block" || exit 0
+          git commit -m "Update Willow: Clean Format" || exit 0
           git push
