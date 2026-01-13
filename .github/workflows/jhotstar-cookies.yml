@@ -21,21 +21,18 @@ jobs:
       - name: Extract Cookie and License
         id: extract
         run: |
-          # 1. Extract the cookie (hdnea or hdntl)
-          COOKIE=$(grep -oE '(hdnea|hdntl)=[^"& ]*' source.m3u | head -1)
+          # 1. Extract the cookie (hdnea or hdntl) - using -a to treat as text
+          COOKIE=$(grep -oaE '(hdnea|hdntl)=[^"& ]*' source.m3u | head -1)
           
-          # 2. Extract KeyID and Key from the URL parameters
-          # Searches for the clkey vercel URL and grabs the hex values
-          URL_LINE=$(grep -oE 'https://clkey.vercel.app/api/results.php\?keyid=[a-f0-9]+&key=[a-f0-9]+' source.m3u | head -1)
-          
-          KEYID=$(echo "$URL_LINE" | sed -n 's/.*keyid=\([a-f0-9]*\).*/\1/p')
-          KEYVAL=$(echo "$URL_LINE" | sed -n 's/.*key=\([a-f0-9]*\).*/\1/p')
+          # 2. Extract KeyID and Key separately from any URL in the file
+          KEYID=$(grep -oaE 'keyid=[a-f0-9]+' source.m3u | head -1 | cut -d'=' -f2)
+          KEYVAL=$(grep -oaE 'key=[a-f0-9]+' source.m3u | head -1 | cut -d'=' -f2)
           
           if [ -n "$KEYID" ] && [ -n "$KEYVAL" ]; then
             LICENSE="$KEYID:$KEYVAL"
           else
-            # Fallback to direct hex:hex if URL pattern isn't found
-            LICENSE=$(grep -oE '[a-f0-9]{32}:[a-f0-9]{32}' source.m3u | head -1)
+            # Fallback to direct hex:hex if URL params are missing
+            LICENSE=$(grep -oaE '[a-f0-9]{32}:[a-f0-9]{32}' source.m3u | head -1)
           fi
           
           if [ -z "$COOKIE" ]; then
@@ -45,15 +42,17 @@ jobs:
 
           echo "cookie=$COOKIE" >> $GITHUB_OUTPUT
           echo "license=$LICENSE" >> $GITHUB_OUTPUT
-          echo "Extracted Cookie: $COOKIE"
-          echo "Extracted License: $LICENSE"
+          
+          echo "DEBUG: Extracted Cookie: $COOKIE"
+          echo "DEBUG: Extracted License: $LICENSE"
 
       - name: Update JioHotstar.json
         run: |
           COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
           LICENSE_VAL="${{ steps.extract.outputs.license }}"
 
-          # Updates all relevant fields for your player
+          # Using jq to update all possible key names used in different players
+          # Targets both the root list or a 'channels' wrapped list
           if jq -e '.channels' JioHotstar.json >/dev/null 2>&1; then
             jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
             '.channels[] |= (.cookie = $c | .drmLicense = $l | .key = $l | .license_key = $l)' \
