@@ -17,7 +17,6 @@ jobs:
 
       - name: Download Source Data
         run: |
-          # Use -L to follow redirects and download as raw text
           curl -fskSL "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u" -o source.txt
 
       - name: Forensic Extraction
@@ -27,25 +26,24 @@ jobs:
           import re
           import os
 
-          # Read raw bytes and decode with 'ignore' to bypass 'line 1 column 1' errors
+          # Read raw bytes and decode with 'ignore' to bypass encoding errors
           with open('source.txt', 'rb') as f:
               raw_data = f.read().decode('utf-8', errors='ignore')
 
           # 1. Extract Cookie (Targeting hdntl or hdnea)
-          cookie_pattern = r'(hdntl|hdnea)=exp=[^"& \n\r\\]*'
-          cookie_match = re.search(cookie_pattern, raw_data)
+          # Simplified pattern to avoid 'unterminated character set' errors
+          cookie_match = re.search(r'(hdntl|hdnea)=exp=[^"& \s\\]+', raw_data)
           cookie = cookie_match.group(0) if cookie_match else ""
 
-          # 2. Extract KeyID and Key (Targeting the vercel URL parameters)
-          # We look for the 32-character hex strings immediately following keyid= and key=
-          kid_match = re.search(r'keyid=([a-f0-9]{32})', raw_data, re.I)
-          key_match = re.search(r'key=([a-f0-9]{32})', raw_data, re.I)
+          # 2. Extract KeyID and Key
+          # We search for the alphanumeric strings following keyid= and key=
+          kid_match = re.search(r'keyid=([a-f0-9]+)', raw_data, re.I)
+          key_match = re.search(r'key=([a-f0-9]+)', raw_data, re.I)
 
           license = ""
           if kid_match and key_match:
               license = f"{kid_match.group(1)}:{key_match.group(1)}"
           
-          # Debug to Action Logs
           print(f"DEBUG_COOKIE: {cookie}")
           print(f"DEBUG_LICENSE: {license}")
 
@@ -60,14 +58,14 @@ jobs:
           COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
           LICENSE_VAL="${{ steps.extract.outputs.license }}"
 
-          # Strict validation to prevent blanking out your file
+          # Strict validation
           if [ -z "$COOKIE_VAL" ] || [ -z "$LICENSE_VAL" ]; then
-            echo "CRITICAL: Extraction failed. Values are empty."
+            echo "CRITICAL: Extraction failed. Cookie or License is empty."
             exit 1
           fi
 
-          # Apply updates to all entries in JioHotstar.json
-          # Targets 'cookie', 'drmLicense', and 'key' fields
+          # Apply updates using jq
+          # This targets .cookie, .drmLicense, and .key as seen in your destination file
           jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
           '(.channels[]? // .[]) |= (.cookie = $c | .drmLicense = $l | .key = $l)' \
           JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
@@ -80,6 +78,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No update needed."
           else
-            git commit -m "Refresh: $(date +'%Y-%m-%d %H:%M')"
+            git commit -m "Refresh JioHotstar Credentials: $(date +'%Y-%m-%d %H:%M')"
             git push
           fi
