@@ -1,8 +1,8 @@
-name: Update JioHotstar Cookie from JSON in jcinema.m3u
+name: Update JioHotstar Cookie from JSON in JioHotstar.json
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Har 6 ghante me
+    - cron: '0 */6 * * *'  # Runs every 6 hours
   workflow_dispatch:
 
 jobs:
@@ -15,35 +15,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download jcinema.m3u
-        run: curl -fsS https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u -o jcinema.m3u
+      - name: Download Source M3U
+        run: curl -fsS https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u -o source.m3u
 
-      - name: Extract hdntl Cookie from JSON Line
+      - name: Extract Cookie Value
         id: extract
         run: |
-          # Find line with {"cookie":"hdntl=..."}
-          COOKIE_LINE=$(grep -o '{"cookie":"hdntl=[^"]*"' jcinema.m3u | head -1)
+          # Look for the full __hdnea__ cookie string inside the JSON block in the M3U
+          COOKIE=$(grep -o '__hdnea__=[^"]*' source.m3u | head -1)
           
-          if [ -z "$COOKIE_LINE" ]; then
-            echo "No JSON cookie line found!"
-            exit 1
-          fi
-          
-          # Extract value inside quotes
-          COOKIE=$(echo "$COOKIE_LINE" | sed -E 's/.*"hdntl=([^"]+)".*/hdntl=\1/')
-          
-          # Validate format: exp=number, acl=%2f*, hmac=64 hex
-          if ! echo "$COOKIE" | grep -qE '^hdntl=exp=[0-9]+~acl=%2f\*~.*~hmac=[a-f0-9]{64}$'; then
-            echo "Invalid cookie format: $COOKIE"
+          if [ -z "$COOKIE" ]; then
+            echo "No valid __hdnea__ cookie found in source!"
             exit 1
           fi
           
           echo "value=$COOKIE" >> $GITHUB_OUTPUT
-          echo "Valid cookie extracted: $COOKIE"
+          echo "Extracted: $COOKIE"
 
-      - name: Update Cookie in JioHotstar.json (All Channels)
+      - name: Update Cookie in JioHotstar.json
         run: |
-          jq --arg c "${{ steps.extract.outputs.value }}" '.[] |= (.cookie = $c)' JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
+          # Updates the 'cookie' field for all objects in the JioHotstar.json file
+          # This assumes JioHotstar.json is a direct list [] or contains a 'channels' key
+          if jq -e '.channels' JioHotstar.json >/dev/null 2>&1; then
+            jq --arg c "${{ steps.extract.outputs.value }}" '.channels[] |= (.cookie = $c)' JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
+          else
+            jq --arg c "${{ steps.extract.outputs.value }}" '.[] |= (.cookie = $c)' JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
+          fi
 
       - name: Commit & Push (Only if Changed)
         run: |
@@ -51,8 +48,8 @@ jobs:
           git config user.email "github-actions@github.com"
           git add JioHotstar.json
           if git diff --staged --quiet; then
-            echo "No change in cookie"
+            echo "No change in cookie detected."
           else
-            git commit -m "Update hdntl cookie from jcinema.m3u [skip ci]"
+            git commit -m "Update JioHotstar cookies from source [skip ci]"
             git push
           fi
