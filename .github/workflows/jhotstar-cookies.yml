@@ -21,22 +21,26 @@ jobs:
       - name: Extract Cookie and License
         id: extract
         run: |
-          # 1. Extract the cookie (hdnea or hdntl) - using -a to treat as text
-          COOKIE=$(grep -oaE '(hdnea|hdntl)=[^"& ]*' source.m3u | head -1)
+          # Use 'strings' to remove any non-text characters that cause grep errors
+          CLEAN_TEXT=$(strings source.m3u)
           
-          # 2. Extract KeyID and Key separately from any URL in the file
-          KEYID=$(grep -oaE 'keyid=[a-f0-9]+' source.m3u | head -1 | cut -d'=' -f2)
-          KEYVAL=$(grep -oaE 'key=[a-f0-9]+' source.m3u | head -1 | cut -d'=' -f2)
+          # 1. Extract the cookie (hdnea or hdntl)
+          COOKIE=$(echo "$CLEAN_TEXT" | grep -oE '(hdnea|hdntl)=[^"& ]*' | head -1)
+          
+          # 2. Extract KeyID and Key separately using sed for accuracy
+          # Targeted specifically at the clkey.vercel.app format
+          KEYID=$(echo "$CLEAN_TEXT" | grep -oE 'keyid=[a-f0-9]+' | head -1 | cut -d'=' -f2)
+          KEYVAL=$(echo "$CLEAN_TEXT" | grep -oE 'key=[a-f0-9]+' | head -1 | cut -d'=' -f2)
           
           if [ -n "$KEYID" ] && [ -n "$KEYVAL" ]; then
             LICENSE="$KEYID:$KEYVAL"
           else
-            # Fallback to direct hex:hex if URL params are missing
-            LICENSE=$(grep -oaE '[a-f0-9]{32}:[a-f0-9]{32}' source.m3u | head -1)
+            # Final fallback if URL parameters are missing
+            LICENSE=$(echo "$CLEAN_TEXT" | grep -oE '[a-f0-9]{32}:[a-f0-9]{32}' | head -1)
           fi
           
           if [ -z "$COOKIE" ]; then
-            echo "Error: No valid cookie found!"
+            echo "Error: Cookie extraction failed!"
             exit 1
           fi
 
@@ -51,8 +55,8 @@ jobs:
           COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
           LICENSE_VAL="${{ steps.extract.outputs.license }}"
 
-          # Using jq to update all possible key names used in different players
-          # Targets both the root list or a 'channels' wrapped list
+          # Updates all entries in JioHotstar.json
+          # Handles both 'channels' wrapper or direct array
           if jq -e '.channels' JioHotstar.json >/dev/null 2>&1; then
             jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
             '.channels[] |= (.cookie = $c | .drmLicense = $l | .key = $l | .license_key = $l)' \
@@ -69,8 +73,8 @@ jobs:
           git config user.email "github-actions@github.com"
           git add JioHotstar.json
           if git diff --staged --quiet; then
-            echo "No changes detected."
+            echo "No changes in content."
           else
-            git commit -m "Update Cookie and DRM License [skip ci]"
+            git commit -m "Auto-refresh Cookie and License [skip ci]"
             git push
           fi
