@@ -17,41 +17,42 @@ jobs:
 
       - name: Download Source Data
         run: |
-          # We download it as a raw text file to avoid any JSON/M3U parsing errors
-          curl -fsSL "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u" -o raw_source.txt
+          # Use -L to follow redirects and download as raw text
+          curl -fskSL "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u" -o source.txt
 
-      - name: Extract Cookie and License (Deep Search)
+      - name: Forensic Extraction
         id: extract
         run: |
           python3 - <<EOF
           import re
           import os
 
-          # Open the file in binary mode then decode to avoid 'line 1 column 1' or encoding errors
-          with open('raw_source.txt', 'rb') as f:
-              content = f.read().decode('utf-8', errors='ignore')
+          # Read raw bytes and decode with 'ignore' to bypass 'line 1 column 1' errors
+          with open('source.txt', 'rb') as f:
+              raw_data = f.read().decode('utf-8', errors='ignore')
 
-          # 1. Extract Cookie (finding hdntl= or hdnea=)
-          cookie_match = re.search(r'(hdntl|hdnea)=exp=[^"& \n\r]*', content)
+          # 1. Extract Cookie (Targeting hdntl or hdnea)
+          cookie_pattern = r'(hdntl|hdnea)=exp=[^"& \n\r\\]*'
+          cookie_match = re.search(cookie_pattern, raw_data)
           cookie = cookie_match.group(0) if cookie_match else ""
 
-          # 2. Extract License (Finding keyid and key anywhere in the file)
-          # We look for the hex values specifically
-          kid_match = re.search(r'keyid=([a-f0-9]{32})', content, re.I)
-          key_match = re.search(r'key=([a-f0-9]{32})', content, re.I)
+          # 2. Extract KeyID and Key (Targeting the vercel URL parameters)
+          # We look for the 32-character hex strings immediately following keyid= and key=
+          kid_match = re.search(r'keyid=([a-f0-9]{32})', raw_data, re.I)
+          key_match = re.search(r'key=([a-f0-9]{32})', raw_data, re.I)
 
-          license_val = ""
+          license = ""
           if kid_match and key_match:
-              license_val = f"{kid_match.group(1)}:{key_match.group(1)}"
+              license = f"{kid_match.group(1)}:{key_match.group(1)}"
           
-          # Debugging prints to GitHub Logs
-          print(f"FOUND COOKIE: {cookie}")
-          print(f"FOUND LICENSE: {license_val}")
+          # Debug to Action Logs
+          print(f"DEBUG_COOKIE: {cookie}")
+          print(f"DEBUG_LICENSE: {license}")
 
-          # Write to GitHub Output
+          # Write to GITHUB_OUTPUT
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f"cookie={cookie}\n")
-              out.write(f"license={license_val}\n")
+              out.write(f"license={license}\n")
           EOF
 
       - name: Update JioHotstar.json
@@ -59,14 +60,14 @@ jobs:
           COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
           LICENSE_VAL="${{ steps.extract.outputs.license }}"
 
-          # If extraction failed, stop the action so we don't break your JSON
+          # Strict validation to prevent blanking out your file
           if [ -z "$COOKIE_VAL" ] || [ -z "$LICENSE_VAL" ]; then
-            echo "CRITICAL ERROR: Could not find Cookie or License in the source file."
+            echo "CRITICAL: Extraction failed. Values are empty."
             exit 1
           fi
 
-          # Update all entries in your JioHotstar.json
-          # We update 'cookie', 'drmLicense', and 'key' fields
+          # Apply updates to all entries in JioHotstar.json
+          # Targets 'cookie', 'drmLicense', and 'key' fields
           jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
           '(.channels[]? // .[]) |= (.cookie = $c | .drmLicense = $l | .key = $l)' \
           JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
@@ -77,8 +78,8 @@ jobs:
           git config user.email "github-actions@github.com"
           git add JioHotstar.json
           if git diff --staged --quiet; then
-            echo "No change in data."
+            echo "No update needed."
           else
-            git commit -m "Credentials Auto-Update: $(date)"
+            git commit -m "Refresh: $(date +'%Y-%m-%d %H:%M')"
             git push
           fi
