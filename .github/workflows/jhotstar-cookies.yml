@@ -2,7 +2,7 @@ name: Update JioHotstar Cookie and DRM
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Runs every 6 hours
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
@@ -19,38 +19,41 @@ jobs:
         run: |
           curl -fskSL "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u" -o source.txt
 
-      - name: Forensic Extraction
+      - name: Precise Extraction
         id: extract
         run: |
           python3 - <<EOF
           import re
           import os
 
-          # Read raw bytes and decode with 'ignore' to bypass encoding errors
+          # File ko raw bytes mein read karke decode karenge
           with open('source.txt', 'rb') as f:
-              raw_data = f.read().decode('utf-8', errors='ignore')
+              data = f.read().decode('utf-8', errors='ignore')
 
-          # 1. Extract Cookie (Targeting hdntl or hdnea)
-          # Simplified pattern to avoid 'unterminated character set' errors
-          cookie_match = re.search(r'(hdntl|hdnea)=exp=[^"& \s\\]+', raw_data)
-          cookie = cookie_match.group(0) if cookie_match else ""
+          # 1. Cookie Extraction
+          # Sidha hdntl ya hdnea se shuru hone wali value uthayenge
+          cookie = ""
+          c_match = re.search(r'(hdntl|hdnea)=exp=[^"& \s\t\n\r]+', data)
+          if c_match:
+              cookie = c_match.group(0)
 
-          # 2. Extract KeyID and Key
-          # We search for the alphanumeric strings following keyid= and key=
-          kid_match = re.search(r'keyid=([a-f0-9]+)', raw_data, re.I)
-          key_match = re.search(r'key=([a-f0-9]+)', raw_data, re.I)
-
-          license = ""
-          if kid_match and key_match:
-              license = f"{kid_match.group(1)}:{key_match.group(1)}"
+          # 2. License Extraction (keyid:key format)
+          # Is baar hum sirf alphanumeric values ko capture karenge
+          kid = re.search(r'keyid=([a-f0-9]+)', data, re.I)
+          key = re.search(r'key=([a-f0-9]+)', data, re.I)
           
-          print(f"DEBUG_COOKIE: {cookie}")
-          print(f"DEBUG_LICENSE: {license}")
+          license_str = ""
+          if kid and key:
+              license_str = f"{kid.group(1)}:{key.group(1)}"
 
-          # Write to GITHUB_OUTPUT
+          # Debugging ke liye
+          print(f"Cookie Found: {cookie}")
+          print(f"License Found: {license_str}")
+
+          # GitHub Output settings
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f"cookie={cookie}\n")
-              out.write(f"license={license}\n")
+              out.write(f"license={license_str}\n")
           EOF
 
       - name: Update JioHotstar.json
@@ -58,14 +61,13 @@ jobs:
           COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
           LICENSE_VAL="${{ steps.extract.outputs.license }}"
 
-          # Strict validation
+          # Check agar data khali hai toh update nahi karenge
           if [ -z "$COOKIE_VAL" ] || [ -z "$LICENSE_VAL" ]; then
-            echo "CRITICAL: Extraction failed. Cookie or License is empty."
+            echo "ERROR: Extraction failed. Values are empty."
             exit 1
           fi
 
-          # Apply updates using jq
-          # This targets .cookie, .drmLicense, and .key as seen in your destination file
+          # JioHotstar.json ko update karein
           jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
           '(.channels[]? // .[]) |= (.cookie = $c | .drmLicense = $l | .key = $l)' \
           JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
@@ -76,8 +78,8 @@ jobs:
           git config user.email "github-actions@github.com"
           git add JioHotstar.json
           if git diff --staged --quiet; then
-            echo "No update needed."
+            echo "No changes to commit."
           else
-            git commit -m "Refresh JioHotstar Credentials: $(date +'%Y-%m-%d %H:%M')"
+            git commit -m "Auto-Update Cookie and DRM"
             git push
           fi
