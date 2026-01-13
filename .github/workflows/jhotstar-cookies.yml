@@ -1,4 +1,4 @@
-name: Update JioHotstar Cookie from JSON in JioHotstar.json
+name: Update JioHotstar Cookie
 
 on:
   schedule:
@@ -21,28 +21,28 @@ jobs:
       - name: Extract Cookie Value
         id: extract
         run: |
-          # Look for the full __hdnea__ cookie string inside the JSON block in the M3U
-          COOKIE=$(grep -o '__hdnea__=[^"]*' source.m3u | head -1)
+          # Smart search for both hdnea and hdntl patterns
+          COOKIE=$(grep -oE '(hdnea|hdntl)=[^"& ]*' source.m3u | head -1)
           
           if [ -z "$COOKIE" ]; then
-            echo "No valid __hdnea__ cookie found in source!"
+            echo "Error: No valid cookie found in source M3U!"
             exit 1
           fi
           
           echo "value=$COOKIE" >> $GITHUB_OUTPUT
-          echo "Extracted: $COOKIE"
+          echo "Extracted Cookie: $COOKIE"
 
       - name: Update Cookie in JioHotstar.json
         run: |
-          # Updates the 'cookie' field for all objects in the JioHotstar.json file
-          # This assumes JioHotstar.json is a direct list [] or contains a 'channels' key
+          # Use jq to update the 'cookie' field. 
+          # This version handles both direct arrays and 'channels' wrapped arrays.
           if jq -e '.channels' JioHotstar.json >/dev/null 2>&1; then
             jq --arg c "${{ steps.extract.outputs.value }}" '.channels[] |= (.cookie = $c)' JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
           else
             jq --arg c "${{ steps.extract.outputs.value }}" '.[] |= (.cookie = $c)' JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
           fi
 
-      - name: Commit & Push (Only if Changed)
+      - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions@github.com"
@@ -50,6 +50,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No change in cookie detected."
           else
-            git commit -m "Update JioHotstar cookies from source [skip ci]"
+            git commit -m "Auto-update JioHotstar cookies [skip ci]"
             git push
           fi
