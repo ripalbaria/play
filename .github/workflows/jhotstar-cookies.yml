@@ -2,8 +2,8 @@ name: Update JioHotstar Cookie and DRM
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Har 6 ghante me chalega
-  workflow_dispatch:      # Manual trigger ke liye
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   update:
@@ -17,32 +17,70 @@ jobs:
 
       - name: Download Source Data
         run: |
-          # Source file download karein
+          # Follow redirect and download correctly
           curl -fskSL "https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u" -o source.txt
 
-      - name: Precise Extraction
+      - name: Final Extraction Logic
         id: extract
         run: |
           python3 - <<EOF
+          import re
           import os
 
-          # File ko raw text ki tarah read karenge taaki JSON error na aaye
+          # File ko raw read karo taaki koi character error na aaye
           with open('source.txt', 'r', errors='ignore') as f:
-              data = f.read()
+              content = f.read()
 
-          # 1. Cookie Extraction (Simple find method)
+          # 1. Cookie Extraction
           cookie = ""
-          if 'hdntl=' in data:
-              start = data.find('hdntl=')
-              # Space ya Quote tak ka data uthayenge
-              end_space = data.find(' ', start)
-              end_quote = data.find('"', start)
-              # Jo pehle mile wahi end point
-              end = min(filter(lambda x: x > 0, [end_space, end_quote, len(data)]))
-              cookie = data[start:end].strip()
-          elif 'hdnea=' in data:
-              start = data.find('hdnea=')
-              end_space = data.find(' ', start)
-              end_quote = data.find('"', start)
-              end = min(filter(lambda x: x > 0, [end_space, end_quote, len(data)]))
-              cookie = data[start:end].strip
+          c_match = re.search(r'hdntl=exp=[^"& \s\t\n\r]+', content)
+          if c_match:
+              cookie = c_match.group(0)
+
+          # 2. License Extraction (The main part)
+          # Hum URL ke andar se keyid aur key ki value nikalenge
+          kid_match = re.search(r'keyid=([a-f0-9]+)', content)
+          key_match = re.search(r'key=([a-f0-9]+)', content)
+
+          license_val = ""
+          if kid_match and key_match:
+              # In dono ko jodkar 'colon' format banao
+              license_val = f"{kid_match.group(1)}:{key_match.group(1)}"
+          
+          # Debugging - Yeh aapko log me dikhega
+          print(f"COOKIE FOUND: {cookie}")
+          print(f"LICENSE FOUND: {license_val}")
+
+          # GitHub environment me save karo
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f"cookie={cookie}\n")
+              out.write(f"license={license_val}\n")
+          EOF
+
+      - name: Update JioHotstar.json
+        run: |
+          COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
+          LICENSE_VAL="${{ steps.extract.outputs.license }}"
+
+          # Check karo agar data mila ya nahi
+          if [ -z "$COOKIE_VAL" ] || [ -z "$LICENSE_VAL" ]; then
+            echo "FAILED: Data not extracted properly!"
+            exit 1
+          fi
+
+          # JioHotstar.json me value update karo
+          jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
+          '(.channels[]? // .[]) |= (.cookie = $c | .drmLicense = $l | .key = $l)' \
+          JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
+
+      - name: Commit and Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions@github.com"
+          git add JioHotstar.json
+          if git diff --staged --quiet; then
+            echo "No changes."
+          else
+            git commit -m "Auto Refresh: $(date)"
+            git push
+          fi
