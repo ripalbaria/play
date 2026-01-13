@@ -1,4 +1,4 @@
-name: Update JioHotstar Cookie
+name: Update JioHotstar Cookie and DRM
 
 on:
   schedule:
@@ -18,28 +18,40 @@ jobs:
       - name: Download Source M3U
         run: curl -fsS https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u -o source.m3u
 
-      - name: Extract Cookie Value
+      - name: Extract Cookie and License
         id: extract
         run: |
-          # Smart search for both hdnea and hdntl patterns
+          # Extract the cookie (supports hdnea or hdntl)
           COOKIE=$(grep -oE '(hdnea|hdntl)=[^"& ]*' source.m3u | head -1)
           
+          # Extract the DRM License Key (looks for the 32:32 hex pattern)
+          LICENSE=$(grep -oE '[a-f0-9]{32}:[a-f0-9]{32}' source.m3u | head -1)
+          
           if [ -z "$COOKIE" ]; then
-            echo "Error: No valid cookie found in source M3U!"
+            echo "Error: No valid cookie found!"
             exit 1
           fi
-          
-          echo "value=$COOKIE" >> $GITHUB_OUTPUT
-          echo "Extracted Cookie: $COOKIE"
 
-      - name: Update Cookie in JioHotstar.json
+          echo "cookie=$COOKIE" >> $GITHUB_OUTPUT
+          echo "license=$LICENSE" >> $GITHUB_OUTPUT
+          echo "Extracted Cookie: $COOKIE"
+          echo "Extracted License: $LICENSE"
+
+      - name: Update JioHotstar.json
         run: |
-          # Use jq to update the 'cookie' field. 
-          # This version handles both direct arrays and 'channels' wrapped arrays.
+          # We update both 'cookie' and 'drmLicense' (or 'key') fields
+          # Using jq to map through the array
+          COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
+          LICENSE_VAL="${{ steps.extract.outputs.license }}"
+
           if jq -e '.channels' JioHotstar.json >/dev/null 2>&1; then
-            jq --arg c "${{ steps.extract.outputs.value }}" '.channels[] |= (.cookie = $c)' JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
+            jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
+            '.channels[] |= (.cookie = $c | .drmLicense = $l | .key = $l)' \
+            JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
           else
-            jq --arg c "${{ steps.extract.outputs.value }}" '.[] |= (.cookie = $c)' JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
+            jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
+            '.[] |= (.cookie = $c | .drmLicense = $l | .key = $l)' \
+            JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
           fi
 
       - name: Commit & Push
@@ -48,8 +60,8 @@ jobs:
           git config user.email "github-actions@github.com"
           git add JioHotstar.json
           if git diff --staged --quiet; then
-            echo "No change in cookie detected."
+            echo "No changes detected."
           else
-            git commit -m "Auto-update JioHotstar cookies [skip ci]"
+            git commit -m "Update Cookie and DRM License [skip ci]"
             git push
           fi
