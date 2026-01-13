@@ -2,7 +2,7 @@ name: Update JioHotstar Cookie and DRM
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Runs every 6 hours
+    - cron: '0 */6 * * *'  # Har 6 ghante me
   workflow_dispatch:
 
 jobs:
@@ -12,60 +12,46 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Source JSON
-        run: |
-          # Downloading the source (which you confirmed is JSON content)
-          curl -fsS https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u -o source.json
+      - name: Download Source Data
+        run: curl -fsS https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u -o source_data.txt
 
-      - name: Extract Cookie and License from JSON
+      - name: Extract Cookie and License (Text-Stream Parsing)
         id: extract
         run: |
           python3 - <<EOF
-          import json
           import re
           import os
-          from urllib.parse import urlparse, parse_qs
 
-          try:
-              with open('source.json', 'r') as f:
-                  data = json.load(f)
+          # Read the file as raw text to avoid JSON parsing errors
+          with open('source_data.txt', 'r', errors='ignore') as f:
+              content = f.read()
               
-              # If source is a list, pick the first entry with a license_url
-              # If it's a dict with 'channels', navigate into it
-              channels = data.get('channels', data) if isinstance(data, dict) else data
+              # 1. Extract Cookie (hdnea or hdntl)
+              # Finds hdntl=exp=... or hdnea=...
+              cookie_match = re.search(r'(hdnea|hdntl)=[^"& \n\r]*', content)
+              cookie = cookie_match.group(0) if cookie_match else ""
               
-              cookie = ""
+              # 2. Extract License from the clkey URL parameters
+              # Targeted search for keyid and key inside that specific URL
               license = ""
+              # Regex to find keyid and key in the vercel app link
+              keyid_match = re.search(r'keyid=([a-f0-9]+)', content)
+              key_match = re.search(r'key=([a-f0-9]+)', content)
+              
+              if keyid_match and key_match:
+                  # Combines them into the required 5181...:3dca... format
+                  license = f"{keyid_match.group(1)}:{key_match.group(1)}"
 
-              for item in channels:
-                  # Get Cookie
-                  if not cookie:
-                      cookie = item.get('cookie', '')
-                  
-                  # Get License from the license_url field
-                  l_url = item.get('license_url', '')
-                  if l_url and 'keyid=' in l_url:
-                      parsed = urlparse(l_url)
-                      params = parse_qs(parsed.query)
-                      kid = params.get('keyid', [''])[0]
-                      k = params.get('key', [''])[0]
-                      if kid and k:
-                          license = f"{kid}:{k}"
-                          break # Found a valid license, stop searching
-
+              # Export to GitHub Environment
               with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
                   out.write(f"cookie={cookie}\n")
                   out.write(f"license={license}\n")
-              
-              print(f"Extracted Cookie: {cookie}")
-              print(f"Extracted License: {license}")
-
-          except Exception as e:
-              print(f"Error parsing source JSON: {e}")
-              exit(1)
+                  
+              print(f"DEBUG: Cookie Extracted: {cookie}")
+              print(f"DEBUG: License Extracted: {license}")
           EOF
 
       - name: Update JioHotstar.json
@@ -74,18 +60,24 @@ jobs:
           LICENSE_VAL="${{ steps.extract.outputs.license }}"
 
           if [ -z "$COOKIE_VAL" ] || [ -z "$LICENSE_VAL" ]; then
-            echo "Failed to extract data from source JSON."
+            echo "ERROR: Could not find Cookie or License in the source file."
             exit 1
           fi
 
-          # Update your destination JSON file
+          # Update all entries in JioHotstar.json
+          # Updates .cookie, .drmLicense, and .key
           jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
           '(.channels[]? // .[]) |= (.cookie = $c | .drmLicense = $l | .key = $l)' \
           JioHotstar.json > tmp.json && mv tmp.json JioHotstar.json
 
-      - name: Commit & Push
+      - name: Commit and Push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions@github.com"
           git add JioHotstar.json
-          git diff --staged --quiet || (git commit -m "Update from source JSON" && git push)
+          if git diff --staged --quiet; then
+            echo "No changes detected."
+          else
+            git commit -m "Credentials updated: $(date)"
+            git push
+          fi
