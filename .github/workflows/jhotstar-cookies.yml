@@ -18,45 +18,54 @@ jobs:
       - name: Download Source M3U
         run: curl -fsS https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jcinema.m3u -o source.m3u
 
-      - name: Extract Cookie and License
+      - name: Extract Cookie and License (Python Robust)
         id: extract
         run: |
-          # Use 'strings' to remove any non-text characters that cause grep errors
-          CLEAN_TEXT=$(strings source.m3u)
-          
-          # 1. Extract the cookie (hdnea or hdntl)
-          COOKIE=$(echo "$CLEAN_TEXT" | grep -oE '(hdnea|hdntl)=[^"& ]*' | head -1)
-          
-          # 2. Extract KeyID and Key separately using sed for accuracy
-          # Targeted specifically at the clkey.vercel.app format
-          KEYID=$(echo "$CLEAN_TEXT" | grep -oE 'keyid=[a-f0-9]+' | head -1 | cut -d'=' -f2)
-          KEYVAL=$(echo "$CLEAN_TEXT" | grep -oE 'key=[a-f0-9]+' | head -1 | cut -d'=' -f2)
-          
-          if [ -n "$KEYID" ] && [ -n "$KEYVAL" ]; then
-            LICENSE="$KEYID:$KEYVAL"
-          else
-            # Final fallback if URL parameters are missing
-            LICENSE=$(echo "$CLEAN_TEXT" | grep -oE '[a-f0-9]{32}:[a-f0-9]{32}' | head -1)
-          fi
-          
-          if [ -z "$COOKIE" ]; then
-            echo "Error: Cookie extraction failed!"
-            exit 1
-          fi
+          # Use Python to extract values safely from large file
+          python3 - <<EOF
+          import re
+          import os
 
-          echo "cookie=$COOKIE" >> $GITHUB_OUTPUT
-          echo "license=$LICENSE" >> $GITHUB_OUTPUT
-          
-          echo "DEBUG: Extracted Cookie: $COOKIE"
-          echo "DEBUG: Extracted License: $LICENSE"
+          with open('source.m3u', 'r', errors='ignore') as f:
+              content = f.read()
+              
+              # Extract Cookie
+              cookie_match = re.search(r'(hdnea|hdntl)=[^"& \n\r]*', content)
+              cookie = cookie_match.group(0) if cookie_match else ""
+              
+              # Extract KeyID and Key
+              keyid_match = re.search(r'keyid=([a-f0-9]+)', content)
+              key_match = re.search(r'key=([a-f0-9]+)', content)
+              
+              license = ""
+              if keyid_match and key_match:
+                  license = f"{keyid_match.group(1)}:{key_match.group(1)}"
+              else:
+                  # Fallback to hex:hex pattern
+                  hex_match = re.search(r'([a-f0-9]{32}:[a-f0-9]{32})', content)
+                  if hex_match:
+                      license = hex_match.group(1)
+
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+                  out.write(f"cookie={cookie}\n")
+                  out.write(f"license={license}\n")
+                  
+              print(f"DEBUG: Extracted Cookie: {cookie}")
+              print(f"DEBUG: Extracted License: {license}")
+          EOF
 
       - name: Update JioHotstar.json
         run: |
           COOKIE_VAL="${{ steps.extract.outputs.cookie }}"
           LICENSE_VAL="${{ steps.extract.outputs.license }}"
 
-          # Updates all entries in JioHotstar.json
-          # Handles both 'channels' wrapper or direct array
+          # Error check: stop if we didn't find the values
+          if [ -z "$COOKIE_VAL" ] || [ -z "$LICENSE_VAL" ]; then
+            echo "Error: Extraction failed. Cookie or License is empty."
+            exit 1
+          fi
+
+          # Update the JSON file (handles root list or 'channels' key)
           if jq -e '.channels' JioHotstar.json >/dev/null 2>&1; then
             jq --arg c "$COOKIE_VAL" --arg l "$LICENSE_VAL" \
             '.channels[] |= (.cookie = $c | .drmLicense = $l | .key = $l | .license_key = $l)' \
