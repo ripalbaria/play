@@ -2,8 +2,8 @@ name: Update M3U Every 20 Mins
 
 on:
   schedule:
-    - cron: '*/20 * * * *' # Runs every 20 minutes
-  workflow_dispatch: # Allows manual trigger
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -30,4 +30,3 @@ jobs:
           git add playlist.m3u
           git commit -m "Auto-update playlist.m3u" || echo "No changes to commit"
           git push
-
