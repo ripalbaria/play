@@ -1,0 +1,29 @@
+name: Update M3U Playlist
+on:
+  schedule:
+    - cron: '*/20 * * * *' # Runs every 20 minutes
+  workflow_dispatch: # Allows you to run it manually
+
+jobs:
+  update-list:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Fetch and Replace
+        run: |
+          # Fetch the content from your secret URL
+          curl -s "${{ secrets.M3U_URL }}" > playlist.m3u
+          
+          # Use sed to swap the domains
+          sed -i 's/jiotvmblive.cdn.jio.com/jiotvbpkmob.cdn.jio.com/g' playlist.m3u
+
+      - name: Commit and Push
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add playlist.m3u
+          git commit -m "Automated M3U update: $(date)" || exit 0
+          git push
+
