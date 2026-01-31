@@ -2,8 +2,8 @@ name: SonyLIV Auto Update
 
 on:
   schedule:
-    - cron: '0 */4 * * *'   # Har 4 ghante mein auto-run
-  workflow_dispatch:        # Manual run karne ke liye button
+    - cron: '0 */4 * * *'   # Runs every 4 hours
+  workflow_dispatch:        # Allows manual run
 
 jobs:
   update-tokens:
@@ -18,12 +18,10 @@ jobs:
       - name: Fetch hdnea (Bypass via Indian VPS)
         id: fetch_hdnea
         env:
-          # Secrets ko environment variables mein map kiya gaya hai
           PROXY: ${{ secrets.SONY_PROXY }}
           API_URL: ${{ secrets.SONY_API_URL }}
         run: |
           echo "Connecting to Indian VPS Proxy..."
-          # curl command jo secrets use karke token fetch karega
           RESPONSE=$(curl -s -L -x "$PROXY" \
             --connect-timeout 120 \
             --retry 5 \
@@ -37,8 +35,7 @@ jobs:
             exit 1
           fi
 
-          # Response se Video URL aur hdnea token extract karna
-          echo "$RESPONSE" > api_response.json
+          # Extracting video URL and token
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
           HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
@@ -48,20 +45,35 @@ jobs:
           fi
 
           echo "Success! Token found."
-          # Token ko agle step ke liye output variable mein save karein
           echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
-      - name: Update s111.m3u
+      - name: Update s111.m3u and Verify
         run: |
           NEW_TOKEN="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          # s111.m3u mein sabhi purane tokens ko naye token se replace karna
+          
+          echo "Debug: Looking for current lines containing hdnea=..."
+          grep "hdnea=" s111.m3u | head -n 2 || echo "No hdnea= pattern found in file!"
+
+          # Apply the update
           sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" s111.m3u
-          echo "Updated s111.m3u successfully."
+          
+          echo "Debug: Verification after update (showing first 2 matches):"
+          grep "hdnea=" s111.m3u | head -n 2
 
       - name: Commit and Push Changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          
+          # Stage the file
           git add s111.m3u
-          # Agar koi change nahi hai toh push skip karein
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV token" && git push)
+          
+          # Forced Check: If git status shows no changes, it means sed didn't find the pattern
+          if git diff --staged --quiet; then
+            echo "Failure: No changes detected in s111.m3u. Check if the 'hdnea=' pattern matches your file exactly."
+            exit 1
+          else
+            echo "Changes detected. Committing..."
+            git commit -m "Auto-update SonyLIV token"
+            git push
+          fi
