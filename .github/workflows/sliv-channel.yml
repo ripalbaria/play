@@ -2,7 +2,7 @@ name: SonyLIV Auto Update
 
 on:
   schedule:
-    - cron: '0 */4 * * *'   # Har 4 ghante mein auto-run
+    - cron: '0 */2 * * *'   # Har 4 ghante mein auto-run
   workflow_dispatch:        # Manual run karne ke liye button
 
 jobs:
