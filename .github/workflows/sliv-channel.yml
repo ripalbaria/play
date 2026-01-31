@@ -51,17 +51,17 @@ jobs:
           # Token ko agle step ke liye output variable mein save karein
           echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
-      - name: Update Slivtv.json
+      - name: Update s111.m3u
         run: |
           NEW_TOKEN="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          # Slivtv.json mein sabhi purane tokens ko naye token se replace karna
+          # s111.m3u mein sabhi purane tokens ko naye token se replace karna
           sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" Slivtv.json
-          echo "Updated Slivtv.json successfully."
+          echo "Updated s111.m3u successfully."
 
       - name: Commit and Push Changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add Slivtv.json
+          git add s111.m3u
           # Agar koi change nahi hai toh push skip karein
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV token" && git push)
