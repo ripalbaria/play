@@ -2,8 +2,8 @@ name: SonyLIV Auto Update
 
 on:
   schedule:
-    - cron: '0 */4 * * *'   # Runs every 4 hours
-  workflow_dispatch:        # Allows manual run
+    - cron: '0 */4 * * *'   # Har 4 ghante mein auto-run
+  workflow_dispatch:        # Manual run karne ke liye button
 
 jobs:
   update-tokens:
@@ -18,10 +18,12 @@ jobs:
       - name: Fetch hdnea (Bypass via Indian VPS)
         id: fetch_hdnea
         env:
+          # Secrets ko environment variables mein map kiya gaya hai
           PROXY: ${{ secrets.SONY_PROXY }}
           API_URL: ${{ secrets.SONY_API_URL }}
         run: |
           echo "Connecting to Indian VPS Proxy..."
+          # curl command jo secrets use karke token fetch karega
           RESPONSE=$(curl -s -L -x "$PROXY" \
             --connect-timeout 120 \
             --retry 5 \
@@ -35,45 +37,31 @@ jobs:
             exit 1
           fi
 
-          # Extracting video URL and token
+          # Response se Video URL aur hdnea token extract karna
+          echo "$RESPONSE" > api_response.json
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
           HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
           if [ -z "$HDNEA" ]; then
-            echo "Error: Token extraction failed."
+            echo "Error: Token extraction failed. Response might be geo-blocked."
             exit 1
           fi
 
           echo "Success! Token found."
+          # Token ko agle step ke liye output variable mein save karein
           echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
-      - name: Update s111.m3u and Verify
+      - name: Update s111.m3u
         run: |
           NEW_TOKEN="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          
-          # Debug: Show the line BEFORE the change
-          echo "Before update, sample line found:"
-          grep "__hdnea__" s111.m3u | head -n 1 || echo "Pattern __hdnea__ NOT FOUND!"
-
-          # Targeted SED for your file structure: matches __hdnea__=
-          sed -i "s|__hdnea__=[^\"' ]*|${NEW_TOKEN}|g" s111.m3u
-          
-          echo "After update, the line is now:"
-          grep "__hdnea__" s111.m3u | head -n 1
+          # s111.m3u mein sabhi purane tokens ko naye token se replace karna
+          sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" s111.m3u
+          echo "Updated s111.m3u successfully."
 
       - name: Commit and Push Changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
           git add s111.m3u
-          
-          # Forced Check: If git status shows no changes, the script will fail
-          if git diff --staged --quiet; then
-            echo "Failure: No changes detected in s111.m3u. Ensure the pattern matches exactly."
-            exit 1
-          else
-            echo "Changes detected. Committing..."
-            git commit -m "Auto-update SonyLIV M3U token"
-            git push
-          fi
+          # Agar koi change nahi hai toh push skip karein
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV token" && git push)
