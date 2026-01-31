@@ -55,7 +55,7 @@ jobs:
         run: |
           NEW_TOKEN="${{ steps.fetch_hdnea.outputs.HDNEA }}"
           # s111.m3u mein sabhi purane tokens ko naye token se replace karna
-          sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" Slivtv.json
+          sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" s111.m3u
           echo "Updated s111.m3u successfully."
 
       - name: Commit and Push Changes
