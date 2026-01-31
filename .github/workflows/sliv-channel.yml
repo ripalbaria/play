@@ -40,7 +40,7 @@ jobs:
           HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
           if [ -z "$HDNEA" ]; then
-            echo "Error: Token extraction failed. Response might be geo-blocked."
+            echo "Error: Token extraction failed."
             exit 1
           fi
 
@@ -51,29 +51,29 @@ jobs:
         run: |
           NEW_TOKEN="${{ steps.fetch_hdnea.outputs.HDNEA }}"
           
-          echo "Debug: Looking for current lines containing hdnea=..."
-          grep "hdnea=" s111.m3u | head -n 2 || echo "No hdnea= pattern found in file!"
+          # Debug: Show the line BEFORE the change
+          echo "Before update, sample line found:"
+          grep "__hdnea__" s111.m3u | head -n 1 || echo "Pattern __hdnea__ NOT FOUND!"
 
-          # Apply the update
-          sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" s111.m3u
+          # Targeted SED for your file structure: matches __hdnea__=
+          sed -i "s|__hdnea__=[^\"' ]*|${NEW_TOKEN}|g" s111.m3u
           
-          echo "Debug: Verification after update (showing first 2 matches):"
-          grep "hdnea=" s111.m3u | head -n 2
+          echo "After update, the line is now:"
+          grep "__hdnea__" s111.m3u | head -n 1
 
       - name: Commit and Push Changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Stage the file
           git add s111.m3u
           
-          # Forced Check: If git status shows no changes, it means sed didn't find the pattern
+          # Forced Check: If git status shows no changes, the script will fail
           if git diff --staged --quiet; then
-            echo "Failure: No changes detected in s111.m3u. Check if the 'hdnea=' pattern matches your file exactly."
+            echo "Failure: No changes detected in s111.m3u. Ensure the pattern matches exactly."
             exit 1
           else
             echo "Changes detected. Committing..."
-            git commit -m "Auto-update SonyLIV token"
+            git commit -m "Auto-update SonyLIV M3U token"
             git push
           fi
