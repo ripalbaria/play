@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download z5.m3u
-        run: curl -fsS https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/z5.m3u -o z5.m3u
+        run: curl -fsS http://mini.allinonereborn.fun/zee_paid/index.php?id=0-9-tvpictureshd -o z5.m3u
 
       - name: Extract Valid hdntl Cookie
         id: cookie
