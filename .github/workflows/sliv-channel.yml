@@ -1,8 +1,8 @@
-name: SonyLIV Auto Update
+name: sonyliv Auto Update
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # Har 4 ghante mein auto-run
+    - cron: '0 */8 * * *'   # Har 8 ghante mein run hoga (Credits bachane ke liye)
   workflow_dispatch:        # Manual run karne ke liye button
 
 jobs:
@@ -15,48 +15,42 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea
+      - name: Fetch hdnea via ScraperAPI
         id: fetch_hdnea
         env:
-          # Secrets ko environment variables mein map kiya gaya hai
-          API_URL: ${{ secrets.SONY_API_URL }}
+          # GitHub secrets se ScraperAPI key le rahe hain
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
+          SONYLIV_URL: "https://apiv4.sonyliv.com/AGL/4.7/A/ENG/MWEB/IN/BR/CONTENT/VIDEOURL/VOD/1000051729"
         run: |
-          echo "Fetching token..."
-          # curl command jo secrets use karke token fetch karega
-          RESPONSE=$(curl -s -L \
-            --connect-timeout 120 \
-            --retry 5 \
-            --retry-delay 10 \
+          echo "Fetching token using ScraperAPI (India Proxy)..."
+          
+          # ScraperAPI request (country_code=in ke sath)
+          RESPONSE=$(curl -s "http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${SONYLIV_URL}&country_code=in&keep_headers=true" \
             -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36' \
-            -H 'Referer: https://www.sonyliv.com/' \
-            "$API_URL")
+            -H 'Referer: https://www.sonyliv.com/')
 
           if [ -z "$RESPONSE" ]; then
-            echo "Error: Timeout or Empty Response."
+            echo "Error: Empty Response from ScraperAPI."
             exit 1
           fi
 
-          # Response se Video URL aur hdnea token extract karna
+          # Response check aur Token extract
           echo "$RESPONSE" > api_response.json
           VIDEO_URL=$(echo "$RESPONSE" | grep -o '"videoURL":"[^"]*' | cut -d'"' -f4 | head -1)
           HDNEA=$(echo "$VIDEO_URL" | grep -o 'hdnea=[^&" ]*' | head -1)
 
           if [ -z "$HDNEA" ]; then
-            echo "Error: Token extraction failed. Response might be geo-blocked."
-            echo "👇👇👇 SONYLIV API RAW RESPONSE 👇👇👇"
+            echo "Error: Token extraction failed. Response details:"
             cat api_response.json
-            echo "👆👆👆 SONYLIV API RAW RESPONSE 👆👆👆"
             exit 1
           fi
 
           echo "Success! Token found."
-          # Token ko agle step ke liye output variable mein save karein
           echo "HDNEA=$HDNEA" >> $GITHUB_OUTPUT
 
       - name: Update s111.m3u
         run: |
           NEW_TOKEN="${{ steps.fetch_hdnea.outputs.HDNEA }}"
-          # s111.m3u mein sabhi purane tokens ko naye token se replace karna
           sed -i "s|hdnea=[^&\"' ]*|${NEW_TOKEN}|g" s111.m3u
           echo "Updated s111.m3u successfully."
 
@@ -65,5 +59,4 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add s111.m3u
-          # Agar koi change nahi hai toh push skip karein
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update SonyLIV token" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update sonyliv token" && git push)
