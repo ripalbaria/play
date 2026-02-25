@@ -15,16 +15,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Fetch hdnea (Bypass via Indian VPS)
+      - name: Fetch hdnea
         id: fetch_hdnea
         env:
           # Secrets ko environment variables mein map kiya gaya hai
-          PROXY: ${{ secrets.SONY_PROXY }}
           API_URL: ${{ secrets.SONY_API_URL }}
         run: |
-          echo "Connecting to Indian VPS Proxy..."
+          echo "Fetching token..."
           # curl command jo secrets use karke token fetch karega
-          RESPONSE=$(curl -s -L -x "$PROXY" \
+          RESPONSE=$(curl -s -L \
             --connect-timeout 120 \
             --retry 5 \
             --retry-delay 10 \
@@ -33,7 +32,7 @@ jobs:
             "$API_URL")
 
           if [ -z "$RESPONSE" ]; then
-            echo "Error: Timeout or Empty Response. Check if VPS is running."
+            echo "Error: Timeout or Empty Response."
             exit 1
           fi
 
