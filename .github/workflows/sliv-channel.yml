@@ -43,6 +43,9 @@ jobs:
 
           if [ -z "$HDNEA" ]; then
             echo "Error: Token extraction failed. Response might be geo-blocked."
+            echo "👇👇👇 SONYLIV API RAW RESPONSE 👇👇👇"
+            cat api_response.json
+            echo "👆👆👆 SONYLIV API RAW RESPONSE 👆👆👆"
             exit 1
           fi
 
